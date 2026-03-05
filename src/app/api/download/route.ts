@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   const setting = await sql`SELECT value FROM app_settings WHERE key = 'download_url' LIMIT 1`
   const downloadUrl = setting[0]?.value
 
-  if (!downloadUrl || downloadUrl.includes('YOUR_USERNAME'))
+  if (!downloadUrl)
     return NextResponse.json({ error: 'Download not configured yet. Contact admin.' }, { status: 503 })
 
   // Log the download
