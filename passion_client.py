@@ -562,7 +562,7 @@ class NavItem(QWidget):
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 class Sidebar(QWidget):
     nav_changed = pyqtSignal(int)
-    NAV = ["Visual", "Aimbot", "Player", "Misc", "Settings"]
+    NAV = ["Visual", "Aimbot", "Player", "Misc",]
 
     def __init__(self, key_info: dict, parent=None):
         super().__init__(parent)
