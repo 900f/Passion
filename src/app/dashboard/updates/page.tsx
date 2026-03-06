@@ -205,9 +205,26 @@ export default function UpdatesPage() {
               type="file"
               accept=".py,.exe,.zip"
               onChange={e => setSelectedFile(e.target.files?.[0] ?? null)}
-              className="h-[38px] w-full rounded-[7px] px-3 text-[13px] outline-none cursor-pointer"
-              style={{ ...inputSt, paddingTop: '7px' }}
+              className="hidden"
             />
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="h-[38px] w-full rounded-[7px] px-3 text-[13px] text-left flex items-center gap-2 transition-colors"
+              style={{
+                background: '#2a2024',
+                border: `1px solid ${selectedFile ? '#5a4f52' : '#352c2f'}`,
+                color: selectedFile ? '#c5c0c2' : '#5d585c',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.borderColor = '#5a4f52')}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = selectedFile ? '#5a4f52' : '#352c2f')}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: '#868283' }}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <span className="truncate">
+                {selectedFile ? selectedFile.name : 'Choose file (.py, .exe, .zip)'}
+              </span>
+            </button>
           </div>
         </div>
 
