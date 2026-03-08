@@ -7,11 +7,8 @@ import { v4 as uuidv4 } from 'uuid'
 import sql from '@/lib/db'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-01-27.acacia',
+  apiVersion: '2026-02-25.clover',
 })
-
-// Disable Next.js body parsing — Stripe needs the raw body for signature verification
-export const config = { api: { bodyParser: false } }
 
 export async function POST(req: NextRequest) {
   const sig      = req.headers.get('stripe-signature') ?? ''
