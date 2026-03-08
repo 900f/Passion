@@ -17,43 +17,26 @@ function fmt(amount: number | null, currency: string) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currency.toUpperCase(),
-    minimumFractionDigits: 0,
+    minimumFractionDigits: 2,
   }).format(amount / 100)
 }
 
-function getDurationLabel(name: string): { label: string; sublabel: string; days: string } {
+function getPlanMeta(name: string): {
+  tier: string; period: string; days: string; order: number; accent: string; glow: string
+} {
   const n = name.toLowerCase()
-  if (n.includes('daily')   || n.includes('day'))   return { label: 'Daily',    sublabel: 'Renews every day',    days: '1 day'   }
-  if (n.includes('weekly')  || n.includes('week'))  return { label: 'Weekly',   sublabel: 'Renews every week',   days: '7 days'  }
-  if (n.includes('monthly') || n.includes('month')) return { label: 'Monthly',  sublabel: 'Renews every month',  days: '30 days' }
-  if (n.includes('lifetime'))                       return { label: 'Lifetime', sublabel: 'Never expires',       days: '∞'       }
-  return { label: name, sublabel: '', days: '' }
+  if (n.includes('daily')   || n.includes('day'))   return { tier: 'Daily',    period: 'per day',    days: '1 day',   order: 0, accent: '#e87c3e', glow: 'rgba(232,124,62,0.15)'  }
+  if (n.includes('weekly')  || n.includes('week'))  return { tier: 'Weekly',   period: 'per week',   days: '7 days',  order: 1, accent: '#9b6dff', glow: 'rgba(155,109,255,0.15)' }
+  if (n.includes('monthly') || n.includes('month')) return { tier: 'Monthly',  period: 'per month',  days: '30 days', order: 2, accent: '#3b9eff', glow: 'rgba(59,158,255,0.15)'  }
+  if (n.includes('lifetime'))                       return { tier: 'Lifetime', period: 'one time',   days: '∞',       order: 3, accent: '#dc2625', glow: 'rgba(220,38,37,0.2)'    }
+  return { tier: name, period: '', days: '', order: 4, accent: '#dc2625', glow: 'rgba(220,38,37,0.15)' }
 }
 
-const PLAN_FEATURES: Record<string, string[]> = {
-  daily:    ['License key delivered instantly', 'HWID-lock support', 'Access while active'],
-  weekly:   ['License key delivered instantly', 'HWID-lock support', 'Access while active'],
-  monthly:  ['License key delivered instantly', 'HWID-lock support', 'Access while active'],
-  lifetime: ['License key delivered instantly', 'HWID-lock support', 'All future updates', 'Never expires'],
-}
-
-function getFeatures(name: string): string[] {
-  const n = name.toLowerCase()
-  if (n.includes('daily')   || n.includes('day'))   return PLAN_FEATURES.daily
-  if (n.includes('weekly')  || n.includes('week'))  return PLAN_FEATURES.weekly
-  if (n.includes('monthly') || n.includes('month')) return PLAN_FEATURES.monthly
-  if (n.includes('lifetime'))                       return PLAN_FEATURES.lifetime
-  return PLAN_FEATURES.monthly
-}
-
-// Sort order: daily → weekly → monthly → lifetime
-function planOrder(name: string): number {
-  const n = name.toLowerCase()
-  if (n.includes('daily')   || n.includes('day'))   return 0
-  if (n.includes('weekly')  || n.includes('week'))  return 1
-  if (n.includes('monthly') || n.includes('month')) return 2
-  if (n.includes('lifetime'))                       return 3
-  return 4
+const FEATURES: Record<string, string[]> = {
+  Daily:    ['Full access for 24 hours', 'HWID device lock', 'Instant key delivery'],
+  Weekly:   ['Full access for 7 days',   'HWID device lock', 'Instant key delivery'],
+  Monthly:  ['Full access for 30 days',  'HWID device lock', 'Instant key delivery', 'Priority support'],
+  Lifetime: ['Full access forever',       'HWID device lock', 'Instant key delivery', 'All future updates', 'Priority support'],
 }
 
 export default function PurchasePage() {
@@ -62,13 +45,15 @@ export default function PurchasePage() {
   const [buying, setBuying]   = useState<string | null>(null)
   const [email, setEmail]     = useState('')
   const [error, setError]     = useState('')
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    setMounted(true)
     fetch('/api/stripe/prices')
       .then(r => r.json())
       .then(d => {
         const sorted = (Array.isArray(d) ? d : []).sort(
-          (a: Price, b: Price) => planOrder(a.productName) - planOrder(b.productName)
+          (a: Price, b: Price) => getPlanMeta(a.productName).order - getPlanMeta(b.productName).order
         )
         setPrices(sorted)
         setLoading(false)
@@ -81,9 +66,9 @@ export default function PurchasePage() {
     setBuying(priceId)
     try {
       const res = await fetch('/api/stripe/checkout', {
-        method:  'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ priceId, customerEmail: email || undefined }),
+        body: JSON.stringify({ priceId, customerEmail: email || undefined }),
       })
       const data = await res.json()
       if (!res.ok || !data.url) { setError(data.error || 'Checkout failed.'); return }
@@ -96,157 +81,346 @@ export default function PurchasePage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-16"
-         style={{ background: '#0f0b0c' }}>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap');
 
-      <div className="absolute pointer-events-none"
-           style={{
-             width: 800, height: 800,
-             background: 'radial-gradient(circle, rgba(220,38,37,0.05) 0%, transparent 65%)',
-             top: '50%', left: '50%',
-             transform: 'translate(-50%, -50%)',
-           }} />
+        .purchase-root {
+          min-height: 100vh;
+          background: #0a0809;
+          font-family: 'DM Sans', sans-serif;
+          position: relative;
+          overflow: hidden;
+        }
 
-      <div className="relative w-full max-w-4xl">
-        <div className="text-center mb-10">
-          <h1 className="text-[32px] font-bold tracking-tight mb-3"
-              style={{ color: '#e5e3e4', textShadow: '0 0 30px rgba(220,38,37,0.3)' }}>
-            Passion
-          </h1>
-          <p className="text-[15px]" style={{ color: '#5d585c' }}>
-            Choose a plan. Your key activates the moment you first use it.
-          </p>
-        </div>
+        .bg-grid {
+          position: fixed;
+          inset: 0;
+          background-image:
+            linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+          background-size: 48px 48px;
+          pointer-events: none;
+        }
 
-        {/* Email */}
-        <div className="mb-8 max-w-sm mx-auto">
-          <label className="text-[12px] uppercase tracking-widest block mb-2" style={{ color: '#5d585c' }}>
-            Your email (optional — for key delivery)
-          </label>
-          <input
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            className="h-[42px] w-full rounded-[8px] px-3 text-[13px] outline-none"
-            style={{ background: '#2a2024', border: '1px solid #352c2f', color: '#c5c0c2' }}
-            onFocus={e => { e.target.style.borderColor = '#5a4f52' }}
-            onBlur={e  => { e.target.style.borderColor = '#352c2f' }}
-          />
-        </div>
+        .bg-noise {
+          position: fixed;
+          inset: 0;
+          opacity: 0.03;
+          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+          pointer-events: none;
+        }
 
-        {error && (
-          <p className="text-center text-[13px] mb-6" style={{ color: '#dc2625' }}>{error}</p>
-        )}
+        .card-enter {
+          opacity: 0;
+          transform: translateY(24px);
+          animation: cardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
 
-        {loading ? (
-          <div className="text-center py-16" style={{ color: '#5d585c' }}>Loading plans…</div>
-        ) : prices.length === 0 ? (
-          <div className="text-center py-16" style={{ color: '#5d585c' }}>
-            No plans configured yet.{' '}
-            <a href="/login" style={{ color: '#dc2625' }}>Admin →</a>
+        @keyframes cardIn {
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .plan-card {
+          position: relative;
+          border-radius: 20px;
+          padding: 28px;
+          display: flex;
+          flex-direction: column;
+          cursor: default;
+          transition: transform 0.25s cubic-bezier(0.16,1,0.3,1), box-shadow 0.25s ease;
+        }
+
+        .plan-card:hover {
+          transform: translateY(-4px);
+        }
+
+        .shimmer-line {
+          height: 1px;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+          margin: 20px 0;
+        }
+
+        .buy-btn {
+          height: 46px;
+          border-radius: 10px;
+          font-family: 'Syne', sans-serif;
+          font-weight: 700;
+          font-size: 14px;
+          letter-spacing: 0.5px;
+          border: none;
+          cursor: pointer;
+          width: 100%;
+          transition: opacity 0.15s, transform 0.15s;
+          position: relative;
+          overflow: hidden;
+          color: white;
+        }
+
+        .buy-btn:hover:not(:disabled) {
+          opacity: 0.88;
+          transform: scale(0.98);
+        }
+
+        .buy-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .buy-btn::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(180deg, rgba(255,255,255,0.12) 0%, transparent 100%);
+          pointer-events: none;
+        }
+
+        .feature-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: 13px;
+          color: #7a7578;
+          padding: 4px 0;
+        }
+
+        .feature-dot {
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+          flex-shrink: 0;
+        }
+
+        .email-input {
+          height: 46px;
+          width: 100%;
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 10px;
+          padding: 0 14px;
+          font-size: 14px;
+          font-family: 'DM Sans', sans-serif;
+          color: #c5c0c2;
+          outline: none;
+          transition: border-color 0.15s, background 0.15s;
+        }
+
+        .email-input:focus {
+          border-color: rgba(220,38,37,0.4);
+          background: rgba(255,255,255,0.06);
+        }
+
+        .email-input::placeholder { color: #3a3537; }
+
+        .popular-ring {
+          position: absolute;
+          inset: -1px;
+          border-radius: 21px;
+          background: linear-gradient(135deg, #dc2625, #ff6b6b, #dc2625);
+          background-size: 200% 200%;
+          animation: ringPulse 3s ease infinite;
+          z-index: -1;
+        }
+
+        @keyframes ringPulse {
+          0%, 100% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+        }
+
+        .price-num {
+          font-family: 'Syne', sans-serif;
+          font-weight: 800;
+          line-height: 1;
+        }
+
+        .header-title {
+          font-family: 'Syne', sans-serif;
+          font-weight: 800;
+        }
+      `}</style>
+
+      <div className="purchase-root">
+        <div className="bg-grid" />
+        <div className="bg-noise" />
+
+        {/* Ambient glow blobs */}
+        <div style={{
+          position: 'fixed', top: '-20%', left: '50%', transform: 'translateX(-50%)',
+          width: 600, height: 600,
+          background: 'radial-gradient(circle, rgba(220,38,37,0.06) 0%, transparent 70%)',
+          pointerEvents: 'none',
+        }} />
+
+        <div style={{ position: 'relative', zIndex: 1, padding: '72px 24px 80px', maxWidth: 1100, margin: '0 auto' }}>
+
+          {/* Header */}
+          <div style={{ textAlign: 'center', marginBottom: 64 }}
+               className={mounted ? 'card-enter' : ''}>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '6px 16px', borderRadius: 100,
+              background: 'rgba(220,38,37,0.08)',
+              border: '1px solid rgba(220,38,37,0.2)',
+              marginBottom: 24,
+            }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#dc2625' }} />
+              <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 2, color: '#dc2625', textTransform: 'uppercase', fontFamily: 'Syne, sans-serif' }}>
+                Choose your plan
+              </span>
+            </div>
+
+            <h1 className="header-title" style={{ fontSize: 52, color: '#f0ecee', margin: '0 0 16px', letterSpacing: -1.5 }}>
+              Get Access to<br />
+              <span style={{ color: '#dc2625' }}>Passion</span>
+            </h1>
+            <p style={{ fontSize: 16, color: '#4a4648', maxWidth: 420, margin: '0 auto', lineHeight: 1.6 }}>
+              Your key activates the moment you first use it —<br />not when you buy it.
+            </p>
           </div>
-        ) : (
-          <div className={`grid gap-4 ${
-            prices.length <= 2 ? 'max-w-2xl mx-auto grid-cols-' + prices.length :
-            prices.length === 3 ? 'grid-cols-3' : 'grid-cols-2 lg:grid-cols-4'
-          }`}>
-            {prices.map(p => {
-              const { label, sublabel, days } = getDurationLabel(p.productName)
-              const features  = getFeatures(p.productName)
-              const isLifetime = label === 'Lifetime'
 
-              return (
-                <div key={p.id}
-                     className="rounded-[16px] p-6 relative flex flex-col"
-                     style={{
-                       background: isLifetime
-                         ? 'linear-gradient(180deg,#2a1518 0%,#1f1013 100%)'
-                         : 'linear-gradient(180deg,#21161a 0%,#161014 100%)',
-                       border: `1px solid ${isLifetime ? '#dc262555' : '#352f31'}`,
-                       boxShadow: isLifetime
-                         ? '0 0 30px rgba(220,38,37,0.12), 0 12px 40px rgba(0,0,0,0.6)'
-                         : '0 8px 30px rgba(0,0,0,0.4)',
-                     }}>
+          {/* Email field */}
+          <div style={{ maxWidth: 360, margin: '0 auto 52px' }}
+               className={mounted ? 'card-enter' : ''}
+               style2={{ animationDelay: '0.1s' }}>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: 1.5, color: '#3a3537', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'Syne, sans-serif' }}>
+              Email for key delivery
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com  (optional)"
+              className="email-input"
+            />
+          </div>
 
-                  {isLifetime && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                      <span className="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide"
-                            style={{ background: '#dc2625', color: '#fff' }}>
-                        Best Value
-                      </span>
+          {error && (
+            <p style={{ textAlign: 'center', color: '#dc2625', fontSize: 13, marginBottom: 24 }}>{error}</p>
+          )}
+
+          {/* Plans */}
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '64px 0', color: '#3a3537', fontFamily: 'Syne, sans-serif', letterSpacing: 2, fontSize: 12, textTransform: 'uppercase' }}>
+              Loading plans…
+            </div>
+          ) : prices.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '64px 0', color: '#3a3537' }}>
+              No plans configured. <a href="/login" style={{ color: '#dc2625' }}>Admin →</a>
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${Math.min(prices.length, 4)}, 1fr)`,
+              gap: 16,
+              alignItems: 'start',
+            }}>
+              {prices.map((p, idx) => {
+                const meta     = getPlanMeta(p.productName)
+                const isLifetime = meta.tier === 'Lifetime'
+                const features  = FEATURES[meta.tier] ?? FEATURES.Monthly
+                const delay     = `${idx * 0.08 + 0.15}s`
+
+                return (
+                  <div key={p.id}
+                       className={`card-enter`}
+                       style={{ animationDelay: delay }}>
+                    <div
+                      className="plan-card"
+                      style={{
+                        background: isLifetime
+                          ? 'linear-gradient(145deg, #1e0f10 0%, #160c0d 100%)'
+                          : 'linear-gradient(145deg, #161012 0%, #110d0f 100%)',
+                        border: isLifetime ? 'none' : '1px solid rgba(255,255,255,0.05)',
+                        boxShadow: isLifetime
+                          ? `0 0 0 1px rgba(220,38,37,0.3), 0 24px 64px rgba(0,0,0,0.6), 0 0 40px ${meta.glow}`
+                          : '0 8px 32px rgba(0,0,0,0.4)',
+                      }}>
+
+                      {isLifetime && <div className="popular-ring" />}
+
+                      {isLifetime && (
+                        <div style={{
+                          position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)',
+                          background: '#dc2625',
+                          padding: '4px 14px', borderRadius: 100,
+                          fontSize: 10, fontWeight: 800, letterSpacing: 2,
+                          color: '#fff', textTransform: 'uppercase',
+                          fontFamily: 'Syne, sans-serif',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          Best Value
+                        </div>
+                      )}
+
+                      {/* Plan label */}
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          padding: '4px 10px', borderRadius: 6,
+                          background: meta.accent + '18',
+                          border: `1px solid ${meta.accent}30`,
+                          marginBottom: 12,
+                        }}>
+                          <div style={{ width: 5, height: 5, borderRadius: '50%', background: meta.accent }} />
+                          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: meta.accent, textTransform: 'uppercase', fontFamily: 'Syne, sans-serif' }}>
+                            {meta.days}
+                          </span>
+                        </div>
+
+                        <h2 style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 22, color: '#f0ecee', margin: 0 }}>
+                          {meta.tier}
+                        </h2>
+                      </div>
+
+                      {/* Price */}
+                      <div style={{ marginBottom: 4 }}>
+                        <span className="price-num" style={{ fontSize: 42, color: '#f0ecee' }}>
+                          {fmt(p.amount, p.currency)}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: 12, color: '#3a3537', marginBottom: 0, fontWeight: 500, letterSpacing: 0.5 }}>
+                        {meta.period}
+                      </p>
+
+                      <div className="shimmer-line" />
+
+                      {/* Features */}
+                      <div style={{ flex: 1, marginBottom: 24 }}>
+                        {features.map(f => (
+                          <div key={f} className="feature-item">
+                            <div className="feature-dot" style={{ background: meta.accent }} />
+                            {f}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* CTA */}
+                      <button
+                        className="buy-btn"
+                        onClick={() => buy(p.id)}
+                        disabled={buying === p.id}
+                        style={{ background: isLifetime ? `linear-gradient(135deg, #dc2625, #b91c1b)` : `linear-gradient(135deg, ${meta.accent}cc, ${meta.accent}99)` }}>
+                        {buying === p.id ? 'Redirecting…' : `Get ${meta.tier}`}
+                      </button>
                     </div>
-                  )}
-
-                  {/* Duration badge */}
-                  <div className="mb-4">
-                    <span className="px-2.5 py-1 rounded-[6px] text-[11px] font-bold uppercase tracking-wide"
-                          style={{
-                            background: isLifetime ? '#dc262522' : '#2a2024',
-                            color: isLifetime ? '#dc2625' : '#5d585c',
-                            border: `1px solid ${isLifetime ? '#dc262544' : '#352f31'}`,
-                          }}>
-                      {days}
-                    </span>
                   </div>
+                )
+              })}
+            </div>
+          )}
 
-                  <h2 className="text-[20px] font-bold mb-1" style={{ color: '#e5e3e4' }}>
-                    {label}
-                  </h2>
-                  <p className="text-[12px] mb-5" style={{ color: '#5d585c' }}>{sublabel}</p>
-
-                  <div className="mb-6">
-                    <span className="text-[34px] font-bold" style={{ color: '#e5e3e4' }}>
-                      {fmt(p.amount, p.currency)}
-                    </span>
-                    {!isLifetime && (
-                      <span className="text-[13px] ml-1" style={{ color: '#5d585c' }}>
-                        /{label.toLowerCase()}
-                      </span>
-                    )}
-                  </div>
-
-                  <ul className="mb-6 space-y-2 flex-1">
-                    {features.map(f => (
-                      <li key={f} className="flex items-center gap-2 text-[13px]" style={{ color: '#868283' }}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#dc2625" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12"/>
-                        </svg>
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-
-                  <button
-                    onClick={() => buy(p.id)}
-                    disabled={buying === p.id}
-                    className="w-full h-[44px] rounded-[9px] font-bold text-[14px] text-white transition-all disabled:opacity-50 mt-auto"
-                    style={{
-                      background: '#dc2625',
-                      boxShadow: isLifetime ? '0 0 20px rgba(220,38,37,0.4)' : 'none',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#e83433')}
-                    onMouseLeave={e => (e.currentTarget.style.background = '#dc2625')}
-                  >
-                    {buying === p.id ? 'Redirecting…' : `Get ${label}`}
-                  </button>
-                </div>
-              )
-            })}
+          {/* Footer */}
+          <div style={{ textAlign: 'center', marginTop: 52 }}>
+            <p style={{ fontSize: 12, color: '#2a2527', marginBottom: 8 }}>
+              Secured by Stripe · No subscription · Cancel anytime
+            </p>
+            <a href="/download"
+               style={{ fontSize: 12, color: '#2a2527', textDecoration: 'none', transition: 'color 0.15s' }}
+               onMouseEnter={e => (e.currentTarget.style.color = '#5d585c')}
+               onMouseLeave={e => (e.currentTarget.style.color = '#2a2527')}>
+              Already have a key? Download →
+            </a>
           </div>
-        )}
 
-        <div className="mt-10 text-center">
-          <p className="text-[12px] mb-2" style={{ color: '#3a3537' }}>
-            ⏱ Your key's timer starts the first time you use it, not when you buy it.
-          </p>
-          <a href="/download" className="text-[12px]" style={{ color: '#3a3537' }}
-             onMouseEnter={e => (e.currentTarget.style.color = '#5d585c')}
-             onMouseLeave={e => (e.currentTarget.style.color = '#3a3537')}>
-            Already have a key? Download →
-          </a>
         </div>
       </div>
-    </div>
+    </>
   )
 }
