@@ -99,6 +99,44 @@ function ColorSwatch({ value, onChange }: { value: string; onChange: (v: string)
   )
 }
 
+/* ─── Discord Markdown → HTML ────────────────────────────────── */
+function renderMd(text: string): string {
+  return text
+    // escape HTML first to prevent XSS
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    // bold+italic ***
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    // bold **
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // italic * or _
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/_(?!_)(.+?)_(?!_)/g, '<em>$1</em>')
+    // underline __
+    .replace(/__(.+?)__/g, '<u>$1</u>')
+    // strikethrough ~~
+    .replace(/~~(.+?)~~/g, '<s>$1</s>')
+    // spoiler ||
+    .replace(/\|\|(.+?)\|\|/g, '<span style="background:#202225;color:#202225;border-radius:3px;padding:0 2px" title="Spoiler">$1</span>')
+    // inline code `
+    .replace(/`([^`]+)`/g, '<code style="background:#202225;padding:1px 5px;border-radius:3px;font-size:0.9em;font-family:monospace">$1</code>')
+    // code block ```
+    .replace(/```[\w]*\n?([\s\S]+?)```/g, '<pre style="background:#202225;padding:8px;border-radius:4px;font-size:0.85em;overflow-x:auto;margin:4px 0"><code style="font-family:monospace">$1</code></pre>')
+    // blockquote >
+    .replace(/^&gt; (.+)$/gm, '<div style="border-left:3px solid #4e5058;padding-left:8px;margin:2px 0;color:#b5bac1">$1</div>')
+    // newlines
+    .replace(/\n/g, '<br/>')
+}
+
+function MD({ text, className, style }: { text: string; className?: string; style?: React.CSSProperties }) {
+  return (
+    <span
+      className={className}
+      style={style}
+      dangerouslySetInnerHTML={{ __html: renderMd(text) }}
+    />
+  )
+}
+
 /* ─── Embed Preview ───────────────────────────────────────── */
 function EmbedPreview({
   color, title, description, fields, footer, thumbnailUrl, imageUrl, author
@@ -107,8 +145,6 @@ function EmbedPreview({
   fields: { name: string; value: string; inline: boolean }[]
   footer: string; thumbnailUrl: string; imageUrl: string; author: string
 }) {
-  const hex = color.replace('#', '')
-  const r = parseInt(hex.slice(0,2),16), g = parseInt(hex.slice(2,4),16), b = parseInt(hex.slice(4,6),16)
   if (!title && !description && fields.every(f => !f.name && !f.value) && !footer)
     return (
       <div className="rounded-[8px] p-4 text-[12px] text-center" style={{ background: '#1e1518', color: '#4a4448' }}>
@@ -124,14 +160,14 @@ function EmbedPreview({
           <div className="flex-1 min-w-0">
             {title && <p className="text-[15px] font-bold mb-1" style={{ color: '#e5e3e4' }}>{title}</p>}
             {description && (
-              <p className="text-[13px] whitespace-pre-wrap" style={{ color: '#b5bac1' }}>{description}</p>
+              <MD text={description} className="text-[13px] block" style={{ color: '#b5bac1', whiteSpace: 'pre-wrap' }} />
             )}
             {fields.filter(f => f.name || f.value).length > 0 && (
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {fields.filter(f => f.name || f.value).map((f, i) => (
                   <div key={i} className={f.inline ? '' : 'col-span-2'}>
                     <p className="text-[12px] font-bold" style={{ color: '#e5e3e4' }}>{f.name}</p>
-                    <p className="text-[12px]" style={{ color: '#b5bac1' }}>{f.value}</p>
+                    <MD text={f.value} className="text-[12px]" style={{ color: '#b5bac1' }} />
                   </div>
                 ))}
               </div>
