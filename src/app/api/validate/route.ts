@@ -1,32 +1,43 @@
+// app/api/validate/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import sql from '@/lib/db'
 import bcrypt from 'bcryptjs'
 
 type KeyRow = {
-  id: number; key_hash: string; status: string
-  hwid: string | null; uses: number; max_uses: number | null; expires_at: string | null
+  id: number
+  key_hash: string
+  status: string
+  hwid: string | null
+  uses: number
+  max_uses: number | null
+  expires_at: string | null
+  duration_days: number | null
 }
 
-const writeLog = async (keyId: number | null, keyValue: string, hwid: string | null, ip: string, success: boolean, reason: string) => {
+const writeLog = async (
+  keyId: number | null, keyValue: string, hwid: string | null,
+  ip: string, success: boolean, reason: string
+) => {
   await sql`
     INSERT INTO key_logs (key_id, key_value, hwid, ip, success, reason)
-    VALUES (${keyId}, ${keyValue}, ${hwid ?? null}, ${ip}, ${success}, ${reason})
-  `
+    VALUES (${keyId}, ${keyValue}, ${hwid ?? null}, ${ip}, ${success}, ${reason})`
 }
 
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? req.headers.get('x-real-ip') ?? 'unknown'
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim()
+    ?? req.headers.get('x-real-ip')
+    ?? 'unknown'
 
   try {
     const { key, hwid } = await req.json()
     if (!key) return NextResponse.json({ error: 'No key provided' }, { status: 400 })
 
     const rows = await sql`
-      SELECT id, key_hash, status, hwid, uses, max_uses, expires_at
+      SELECT id, key_hash, status, hwid, uses, max_uses, expires_at, duration_days
       FROM license_keys
       WHERE key_value = ${key.trim()}
-      LIMIT 1
-    ` as KeyRow[]
+      LIMIT 1` as KeyRow[]
 
     const k = rows[0]
 
@@ -46,6 +57,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ valid: false, reason: `Key is ${k.status}` }, { status: 403 })
     }
 
+    // First activation — start the countdown now
+    if (k.duration_days !== null && k.expires_at === null) {
+      await sql`
+        UPDATE license_keys
+        SET expires_at = NOW() + (${k.duration_days} || ' days')::interval
+        WHERE id = ${k.id}`
+      k.expires_at = new Date(Date.now() + k.duration_days * 86400000).toISOString()
+    }
+
+    // Expiry check (lifetime keys have null expires_at — never expires)
     if (k.expires_at && new Date(k.expires_at) < new Date()) {
       await writeLog(k.id, key.trim(), hwid ?? null, ip, false, 'Expired')
       return NextResponse.json({ valid: false, reason: 'Key expired' }, { status: 403 })
