@@ -1,15 +1,15 @@
 // components/Sidebar.tsx
-
 'use client'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 
 const nav = [
-  { href: '/dashboard',                label: 'Overview',   icon: HomeIcon     },
-  { href: '/dashboard/keys',           label: 'Keys',        icon: KeyIcon      },
-  { href: '/dashboard/purchases',      label: 'Purchases',   icon: PurchaseIcon },
-  { href: '/dashboard/logs',           label: 'Logs',        icon: LogIcon      },
-  { href: '/dashboard/updates',        label: 'Updates',     icon: UpdateIcon   },
+  { href: '/dashboard',           label: 'Overview', icon: HomeIcon     },
+  { href: '/dashboard/keys',      label: 'Keys',     icon: KeyIcon      },
+  { href: '/dashboard/purchases', label: 'Purchases',icon: PurchaseIcon },
+  { href: '/dashboard/logs',      label: 'Logs',     icon: LogIcon      },
+  { href: '/dashboard/updates',   label: 'Updates',  icon: UpdateIcon   },
+  { href: '/dashboard/discord',   label: 'Discord',  icon: DiscordIcon  },
 ]
 
 export default function Sidebar({ username }: { username: string }) {
@@ -74,4 +74,11 @@ function LogIcon({ size = 16 }) {
 }
 function UpdateIcon({ size = 16 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+}
+function DiscordIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 71 55" fill="currentColor">
+      <path d="M60.1 4.9A58.5 58.5 0 0 0 45.7.4a.2.2 0 0 0-.2.1 40.8 40.8 0 0 0-1.8 3.7 54 54 0 0 0-16.2 0A37.5 37.5 0 0 0 25.6.5a.2.2 0 0 0-.2-.1A58.4 58.4 0 0 0 11 4.9a.2.2 0 0 0-.1.1C1.6 18.9-1 32.5.3 46a.2.2 0 0 0 .1.1 58.8 58.8 0 0 0 17.7 9 .2.2 0 0 0 .2-.1 42 42 0 0 0 3.6-5.9.2.2 0 0 0-.1-.3 38.7 38.7 0 0 1-5.5-2.6.2.2 0 0 1 0-.4 27.9 27.9 0 0 0 1.1-.9.2.2 0 0 1 .2 0c11.5 5.3 24 5.3 35.4 0a.2.2 0 0 1 .2 0l1.1.9a.2.2 0 0 1 0 .4 36.3 36.3 0 0 1-5.6 2.6.2.2 0 0 0-.1.3 47.2 47.2 0 0 0 3.6 5.9.2.2 0 0 0 .2.1 58.6 58.6 0 0 0 17.8-9 .2.2 0 0 0 .1-.1C72.9 30.4 69.4 17 60.2 5a.2.2 0 0 0-.1-.1zM23.7 37.8c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.6 0 6.5 3.3 6.4 7.2 0 4-2.8 7.2-6.4 7.2zm23.6 0c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.6 0 6.5 3.3 6.4 7.2 0 4-2.8 7.2-6.4 7.2z"/>
+    </svg>
+  )
 }
