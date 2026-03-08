@@ -58,19 +58,21 @@ export default function PurchasePage() {
 
   async function buy() {
     if (!selectedId) return
-    setError('')
+    if (!email.trim()) { setError("Please enter your email address."); return }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError("Please enter a valid email address."); return }
+    setError("")
     setBuying(true)
     try {
-      const res = await fetch('/api/stripe/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priceId: selectedId, customerEmail: email || undefined }),
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priceId: selectedId, customerEmail: email.trim() }),
       })
       const data = await res.json()
-      if (!res.ok || !data.url) { setError(data.error || 'Checkout failed.'); return }
+      if (!res.ok || !data.url) { setError(data.error || "Checkout failed."); return }
       window.location.href = data.url
     } catch {
-      setError('Network error. Please try again.')
+      setError("Network error. Please try again.")
     } finally {
       setBuying(false)
     }
@@ -444,12 +446,12 @@ export default function PurchasePage() {
             <p className="pur-form-title">Get your license</p>
             <p className="pur-form-sub">One-time payment · No subscription</p>
 
-            <label className="pur-label">Email address</label>
+            <label className="pur-label">Email address <span style={{color:"#dc2625"}}>*</span></label>
             <input
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              placeholder="you@example.com"
+              placeholder="you@example.com  (required)"
               className="pur-input"
             />
 
@@ -495,7 +497,7 @@ export default function PurchasePage() {
 
             {error && <p className="pur-error">{error}</p>}
 
-            <button className="pur-btn" onClick={buy} disabled={buying || !selectedId || loading}>
+            <button className="pur-btn" onClick={buy} disabled={buying || !selectedId || loading || !email.trim()}>
               {buying ? 'Redirecting to Stripe…' : 'Buy Now →'}
             </button>
 
