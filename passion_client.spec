@@ -37,6 +37,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     noarchive=False,
+    log_level='CRITICAL',
 )
 
 import os
@@ -57,13 +58,13 @@ exe = EXE(
     a.datas,
     [],
     name='PassionClient',
-    debug=True,  # Enable debug mode temporarily
+    debug=False,  # Enable debug mode temporarily
     bootloader_ignore_signals=False,
     strip=True,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
