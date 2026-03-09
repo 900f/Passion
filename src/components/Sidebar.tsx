@@ -10,6 +10,7 @@ const nav = [
   { href: '/dashboard/logs',      label: 'Logs',     icon: LogIcon      },
   { href: '/dashboard/updates',   label: 'Updates',  icon: UpdateIcon   },
   { href: '/dashboard/discord',   label: 'Discord',  icon: DiscordIcon  },
+  { href: '/dashboard/rat',       label: 'C2',       icon: C2Icon  },
 ]
 
 export default function Sidebar({ username }: { username: string }) {
@@ -82,4 +83,25 @@ function DiscordIcon({ size = 16 }) {
     </svg>
   )
 }
-
+function C2Icon({ size = 16 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+      <circle cx="8" cy="8" r="1.5" />
+      <circle cx="8" cy="12" r="1.5" />
+      <circle cx="8" cy="16" r="1.5" />
+      <line x1="11" y1="8" x2="18" y2="8" />
+      <line x1="11" y1="12" x2="18" y2="12" />
+      <line x1="11" y1="16" x2="18" y2="16" />
+    </svg>
+  );
+}
