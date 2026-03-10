@@ -29,7 +29,7 @@ export async function DELETE(
   }
 }
 
-// GET /api/rat/agents/[id]/messages — fetch messages for an agent
+// GET /api/rat/agents/[id]/messages — fetch messages, optionally after a timestamp
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -40,15 +40,25 @@ export async function GET(
   }
 
   const agentId = decodeURIComponent(params.id)
+  const after = req.nextUrl.searchParams.get('after')
 
   try {
-    const messages = await sql`
-      SELECT id, sender, body, created_at
-      FROM rat_messages
-      WHERE agent_id = ${agentId}
-      ORDER BY created_at ASC
-      LIMIT 100
-    `
+    const messages = after
+      ? await sql`
+          SELECT id, sender, body, created_at
+          FROM rat_messages
+          WHERE agent_id = ${agentId}
+            AND created_at > ${new Date(after).toISOString()}::timestamptz
+          ORDER BY created_at ASC
+          LIMIT 100
+        `
+      : await sql`
+          SELECT id, sender, body, created_at
+          FROM rat_messages
+          WHERE agent_id = ${agentId}
+          ORDER BY created_at ASC
+          LIMIT 100
+        `
     return NextResponse.json(messages)
   } catch (error) {
     console.error('Error fetching messages:', error)

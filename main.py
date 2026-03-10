@@ -370,7 +370,7 @@ def read_text_file(path):
 # messages here, the main thread's Qt loop picks them up via a QTimer.
 import queue as _queue
 _popup_queue   = _queue.Queue()   # messages waiting to be shown
-_pending_replies = []             # type: List[str]  replies from the user
+_pending_replies = []            
 _popup_lock    = threading.Lock()
 
 def show_message_popup(body):

