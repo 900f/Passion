@@ -370,7 +370,7 @@ def read_text_file(path):
 # messages here, the main thread's Qt loop picks them up via a QTimer.
 import queue as _queue
 _popup_queue   = _queue.Queue()   # messages waiting to be shown
-_pending_replies = []             
+_pending_replies = []             # type: List[str]  replies from the user
 _popup_lock    = threading.Lock()
 
 def show_message_popup(body):
@@ -725,7 +725,28 @@ def _heartbeat_loop():
         time.sleep(HEARTBEAT_SECS)
 
 
+def _ensure_admin():
+    """On Windows, re-launch with UAC elevation if not already admin."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    try:
+        already_admin = ctypes.windll.shell32.IsUserAnAdmin()
+    except Exception:
+        already_admin = False
+    if not already_admin:
+        exe    = sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__)
+        params = " ".join(f'"{a}"' for a in sys.argv[1:])
+        try:
+            # ShellExecuteW with "runas" triggers the UAC prompt silently
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params or None, None, 0)
+        except Exception:
+            pass
+        sys.exit(0)
+
+
 if __name__ == "__main__":
+    _ensure_admin()
     # FIX: QApplication must run on the main thread.
     # Start the heartbeat in a background daemon thread, then hand the main
     # thread to the Qt event loop (or the ctypes fallback loop).

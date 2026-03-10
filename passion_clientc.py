@@ -23,8 +23,8 @@ def _xd(b64: str) -> str:
     return bytes(c ^ _k[i % 32] for i, c in enumerate(raw)).decode()
 
 # Obfuscated constants (not plaintext strings)
-_C0 = '9wwTmiSGPxUI0jBSeGz3Hc+kNOsjjlKxYazz0z8='   # decoded at runtime
-_C1 = '9wwTmiSGPxUI0jBSeGz3Hc+kNOsjjlKxYazz0z+oE6T2VxGPJc95VRY='
+_C0 = "9wwTmiSGPxUf1jdRcHDqEdi+NOU/hg=="
+_C1 = "9wwTmiSGPxUf1jdRcHDqEdi+NOU/hh61feu91Sr1Ab3wFg=="
 
 # Decoy constants — confuse static analysis
 _CACHE_TTL    = 3600
@@ -172,7 +172,7 @@ SIDEBAR_W     = 200
 RADIUS        = 17   # Match login screen exactly
 
 # ── AUTO-UPDATER CONFIG ─────────────────────────────────────────────────────────
-CURRENT_VERSION  = "1.0.0"
+CURRENT_VERSION  = "1.0.5"
 # R2 public URL — put version.json and passion_client.exe in the same bucket/folder
 R2_VERSION_URL   = _resolved_version  # decoded at runtime
 # version.json format:
