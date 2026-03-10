@@ -1055,6 +1055,13 @@ export default function RATPage() {
 
   useEffect(() => { fetchAgents(); const id = setInterval(fetchAgents, 6000); return () => clearInterval(id) }, [fetchAgents])
   useEffect(() => { setDetail(null); fetchDetail() }, [selected, fetchDetail])
+  // Stable ref so the interval never recreates
+  const fetchDetailRef = useRef(fetchDetail)
+  useEffect(() => { fetchDetailRef.current = fetchDetail }, [fetchDetail])
+  useEffect(() => {
+    const id = setInterval(() => fetchDetailRef.current(), 3000)
+    return () => clearInterval(id)
+  }, []) // empty deps — runs once, always calls latest fetchDetail via ref
 
   const uniqueIps = [...new Set(agents.map(a => a.ip))].sort()
 

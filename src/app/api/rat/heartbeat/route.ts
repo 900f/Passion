@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
         AND acked_at IS NULL
         AND type     != 'screenshot'
       ORDER BY created_at ASC
-      LIMIT 10
+      LIMIT 1
     `
 
     // Deliver screenshot as a one-shot flag rather than a persistent command row
