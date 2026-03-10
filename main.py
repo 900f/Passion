@@ -288,18 +288,94 @@ def read_text_file(path: str) -> str:
 _popup_queue: queue.Queue = queue.Queue()
 _reply_queue: queue.Queue = queue.Queue()
 
-def _popup_worker() -> None:
-    """Background thread: show one popup at a time using native Windows dialog."""
-    while True:
-        body = _popup_queue.get()
+def _show_popup(body: str) -> None:
+    """Must be called from the main Qt thread."""
+    try:
+        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
+                                     QLabel, QLineEdit, QPushButton, QTextEdit)
+        from PyQt5.QtCore import Qt
+
+        dlg = QDialog()
+        dlg.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Dialog)
+        dlg.setFixedSize(420, 260)
+        dlg.setStyleSheet("""
+            QDialog{background:#0d0a0b;color:#e5e3e4}
+            QTextEdit{background:#161014;border:1px solid #2e292b;border-radius:6px;
+                      padding:8px;font-size:13px;color:#c5c0c2}
+            QLineEdit{background:#0f0b0c;border:1px solid #2e292b;border-radius:6px;
+                      padding:6px 10px;font-size:12px;color:#c5c0c2}
+            QLineEdit:focus{border-color:#4e4447}
+            QPushButton{background:#1c1418;border:1px solid #2e292b;border-radius:6px;
+                        padding:6px 16px;font-size:12px;color:#868283}
+            QPushButton:hover{background:#2a1a1b;color:#e5e3e4;border-color:#4a4448}
+            QPushButton#send{background:rgba(220,38,37,0.12);border-color:#dc262544;color:#dc2625}
+            QPushButton#send:hover{background:rgba(220,38,37,0.22)}
+        """)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(10)
+
+        title_row = QHBoxLayout()
+        title = QLabel("● Message")
+        title.setStyleSheet("color:#dc2625;font-size:12px;font-weight:bold")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        layout.addLayout(title_row)
+
+        msg_box = QTextEdit()
+        msg_box.setReadOnly(True)
+        msg_box.setPlainText(body)
+        msg_box.setFixedHeight(100)
+        layout.addWidget(msg_box)
+
+        reply_input = QLineEdit()
+        reply_input.setPlaceholderText("Type a reply… (optional)")
+        layout.addWidget(reply_input)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        dismiss_btn = QPushButton("Dismiss")
+        send_btn = QPushButton("Send Reply")
+        send_btn.setObjectName("send")
+        btn_row.addWidget(dismiss_btn)
+        btn_row.addWidget(send_btn)
+        layout.addLayout(btn_row)
+
+        dlg._drag_pos = None
+        def mousePressEvent(e):
+            if e.button() == Qt.LeftButton:
+                dlg._drag_pos = e.globalPos() - dlg.frameGeometry().topLeft()
+        def mouseMoveEvent(e):
+            if dlg._drag_pos and e.buttons() == Qt.LeftButton:
+                dlg.move(e.globalPos() - dlg._drag_pos)
+        dlg.mousePressEvent = mousePressEvent
+        dlg.mouseMoveEvent  = mouseMoveEvent
+
         try:
-            if sys.platform == "win32":
-                import ctypes
-                # MB_OKCANCEL=1, MB_ICONINFORMATION=0x40, MB_TOPMOST=0x40000
-                ctypes.windll.user32.MessageBoxW(0, body, "Message", 0x40 | 0x40000)
-            else:
-                # Linux/Mac fallback
-                subprocess.run(["notify-send", "Message", body], capture_output=True, timeout=5)
+            from PyQt5.QtWidgets import QDesktopWidget
+            screen = QDesktopWidget().screenGeometry()
+            dlg.move((screen.width() - dlg.width()) // 2,
+                     (screen.height() - dlg.height()) // 2)
+        except Exception:
+            pass
+
+        def on_send():
+            r = reply_input.text().strip()
+            if r:
+                _reply_queue.put(r)
+            dlg.accept()
+
+        send_btn.clicked.connect(on_send)
+        dismiss_btn.clicked.connect(dlg.reject)
+        reply_input.returnPressed.connect(on_send)
+
+        dlg.exec_()  # blocks only this dialog, Qt event loop keeps running
+
+    except Exception:
+        import ctypes
+        try:
+            ctypes.windll.user32.MessageBoxW(0, body, "Message", 0x40 | 0x40000)
         except Exception:
             pass
 
@@ -487,13 +563,40 @@ def _heartbeat_loop() -> None:
 
 
 def run() -> None:
-    # Start popup worker thread (shows native Windows dialogs)
-    threading.Thread(target=_popup_worker, daemon=True).start()
-    # Start heartbeat on background thread
+    # Heartbeat on background thread
     threading.Thread(target=_heartbeat_loop, daemon=True).start()
-    # Keep main thread alive
-    while True:
-        time.sleep(60)
+
+    # Main thread owns Qt — must create QApplication here
+    try:
+        from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtCore import QTimer
+
+        app = QApplication(sys.argv)
+        app.setQuitOnLastWindowClosed(False)
+
+        def _drain():
+            try:
+                body = _popup_queue.get_nowait()
+                _show_popup(body)
+            except queue.Empty:
+                pass
+
+        timer = QTimer()
+        timer.timeout.connect(_drain)
+        timer.start(200)
+
+        app.exec_()
+
+    except Exception as e:
+        # Log the error so we can debug noconsole failures
+        try:
+            log_path = Path(os.environ.get("APPDATA", str(Path.home()))) / "ra_error.txt"
+            log_path.write_text(f"Qt init error: {e}\n{traceback.format_exc()}")
+        except Exception:
+            pass
+        # Keep alive without Qt — popups won't show but heartbeat still works
+        while True:
+            time.sleep(60)
 
 # ── Elevation ──────────────────────────────────────────────
 def ensure_admin() -> None:

