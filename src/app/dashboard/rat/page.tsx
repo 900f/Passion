@@ -928,7 +928,7 @@ function ShellTab({ agent }: { agent: Agent }) {
 
 // ─── Info tab ─────────────────────────────────────────────────────────────────
 
-function InfoTab({ agent, onAliasChange, onDelete }: { agent: Agent; onAliasChange: () => void; onDelete: () => void }) {
+function InfoTab({ agent, onAliasChange, onDelete }: { agent: Agent; onAliasChange: () => Promise<void>; onDelete: () => void }) {
   const [alias, setAlias] = useState(agent.alias ?? '')
   const [saving, setSaving] = useState(false)
   const [startup, setStartup] = useState(false)
@@ -937,12 +937,15 @@ function InfoTab({ agent, onAliasChange, onDelete }: { agent: Agent; onAliasChan
 
   async function saveAlias() {
     setSaving(true)
-    await fetch(`/api/rat/agents/${encodeURIComponent(agent.id)}`, {
+    const res = await fetch(`/api/rat/agents/${encodeURIComponent(agent.id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ alias: alias.trim() || null }),
     })
-    setTimeout(() => { setSaving(false); onAliasChange() }, 300)
+    if (res.ok) {
+      await onAliasChange()
+    }
+    setSaving(false)
   }
 
   async function toggleStartup() {

