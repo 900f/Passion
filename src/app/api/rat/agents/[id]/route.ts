@@ -40,11 +40,15 @@ export async function GET(
     `
 
     const messages = await sql`
-      SELECT id, sender, body, created_at 
-      FROM rat_messages 
-      WHERE agent_id = ${agentId}
-      ORDER BY created_at ASC 
-      LIMIT 50
+      SELECT id, sender, body, created_at
+      FROM (
+        SELECT id, sender, body, created_at
+        FROM rat_messages
+        WHERE agent_id = ${agentId}
+        ORDER BY created_at DESC
+        LIMIT 50
+      ) sub
+      ORDER BY created_at ASC
     `
 
     let files = null

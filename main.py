@@ -47,7 +47,7 @@ HEARTBEAT_SECS = 3
 STREAM_SECS    = 0.25
 JPEG_QUALITY   = 55
 STARTUP_NAME   = "RemoteAdminClient"
-RAT_SECRET     = "your_rat_secret_here"
+RAT_SECRET     = "eMgOUrikcdvGTJD74o47"
 # ═══════════════════════════════════════════════════════════
 
 HEARTBEAT_URL = f"{SERVER_URL}/api/rat/heartbeat"
