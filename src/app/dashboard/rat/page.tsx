@@ -709,21 +709,11 @@ function SitesTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDet
 function ChatTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDetail | null; onRefresh: () => void }) {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
-  // Optimistic local messages so sends appear immediately without waiting for DB roundtrip
-  const [optimistic, setOptimistic] = useState<Message[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const serverMessages = detail?.messages ?? []
-  // Keep optimistic messages that haven't yet appeared in the server list
-  const serverBodies = new Set(serverMessages.map(m => m.body + m.sender))
-  const pendingOptimistic = optimistic.filter(m => !serverBodies.has(m.body + m.sender))
-  const messages = [
-    ...serverMessages,
-    ...pendingOptimistic,
-  ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+  const messages = detail?.messages ?? []
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length])
-  // FIX: poll more frequently so replies show up faster
   useEffect(() => { const id = setInterval(onRefresh, 2500); return () => clearInterval(id) }, [onRefresh])
 
   async function send() {
@@ -731,18 +721,9 @@ function ChatTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDeta
     const body = input.trim()
     setSending(true)
     setInput('')
-
-    // Optimistically add the message so it appears immediately
-    const tempMsg: Message = {
-      id: -Date.now(),
-      sender: 'admin',
-      body,
-      created_at: new Date().toISOString(),
-    }
-    setOptimistic(prev => [...prev, tempMsg])
-
     await sendCommand(agent.id, 'message', { body })
-    setTimeout(() => { onRefresh(); setSending(false) }, 400)
+    // Server inserts to rat_messages immediately on POST so a quick refresh shows it
+    setTimeout(() => { onRefresh(); setSending(false) }, 300)
   }
 
   return (
@@ -767,12 +748,10 @@ function ChatTab({ agent, detail, onRefresh }: { agent: Agent; detail: AgentDeta
                 border: `1px solid ${m.sender === 'admin' ? '#dc262533' : '#2e292b'}`,
                 borderBottomRightRadius: m.sender === 'admin' ? 2 : 10,
                 borderBottomLeftRadius: m.sender === 'agent' ? 2 : 10,
-                opacity: m.id < 0 ? 0.6 : 1,  // dim optimistic messages slightly
               }}>
               {m.body}
               <p className="text-[10px] mt-1 opacity-50">
                 {m.sender === 'admin' ? 'You' : agent.alias || agent.username} · {ago(m.created_at)}
-                {m.id < 0 && ' · sending…'}
               </p>
             </div>
           </div>
